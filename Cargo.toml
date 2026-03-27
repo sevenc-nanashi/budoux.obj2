@@ -1,0 +1,13 @@
+[package]
+name = "budoux"
+version = "0.2.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+name = "budoux"
+
+[dependencies]
+aviutl2 = "0.21.0"
+dashmap = "6.1.0"
+lazy-regex = "3.6.0"
