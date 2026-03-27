@@ -2,6 +2,12 @@
 --require:2003801
 --information:https://github.com/sevenc-nanashi/budoux.obj2
 
+---$track:横幅
+---min=1
+---max=1000
+---step=1
+local width = 400
+
 ---$track:サイズ
 ---min=1
 ---max=1000
@@ -26,6 +32,20 @@ local line_spacing = 0
 ---step=0.01
 local speed = 1
 
+---$font:フォント
+local font = "Yu Gothic UI"
+
+---$color:文字色
+local color = 0xffffff
+
+---$check:太字
+local bold = false
+
+---$check:斜体
+local italic = false
+
+---$text:テキスト
+local text = "Hello, World!"
 
 --group:高度な設定,false
 
@@ -55,6 +75,9 @@ end
 
 local callback = ffi.cast("void (*)(const char*)", lua_callback)
 local callback_address = tostring(ffi.cast("intptr_t", callback))
-mod.test(callback_address)
+local layout_success, layout_err = pcall(function() mod.layout(callback_address) end)
 
 callback:free()
+if not layout_success then
+    print("@error", "Failed to initialize text layout:", layout_err)
+end

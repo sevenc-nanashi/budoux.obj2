@@ -6,6 +6,8 @@ use aviutl2::{
     tracing,
 };
 
+mod evaluate_chars;
+
 #[aviutl2::plugin(ScriptModule)]
 struct BudouxMod2 {}
 
@@ -32,6 +34,15 @@ struct LuaHandle {
     callback: LuaCallback,
 }
 unsafe impl Send for LuaHandle {}
+
+struct TextState {
+    bold: bool,
+    italic: bool,
+    strike: bool,
+    size: f64,
+    font: String,
+}
+
 impl LuaHandle {
     fn new(lua_callback: String) -> anyhow::Result<Self> {
         let lua_callback: usize = lua_callback.trim_end_matches("LL").parse()?;
@@ -53,20 +64,39 @@ impl LuaHandle {
     }
 }
 
-static RETURN_STACK: std::sync::Mutex<Vec<Result<String, String>>> = std::sync::Mutex::new(Vec::new());
+static RETURN_STACK: std::sync::Mutex<Vec<Result<String, String>>> =
+    std::sync::Mutex::new(Vec::new());
 fn pop_return_stack() -> anyhow::Result<String> {
     let mut stack = RETURN_STACK.lock().unwrap();
-    stack.pop().context("Return stack is empty")?
+    stack
+        .pop()
+        .context("Return stack is empty")?
         .map_err(|e| anyhow::anyhow!("Lua callback error: {e}"))
 }
 
 #[aviutl2::module::functions]
+#[allow(clippy::too_many_arguments)]
 impl BudouxMod2 {
-    fn test(&self, lua_callback: String) -> aviutl2::AnyResult<()> {
+    fn layout(
+        &self,
+        lua_callback: String,
+        text: String,
+        size: f64,
+        letter_spacing: f64,
+        line_spacing: f64,
+        show_speed: f64,
+        font: String,
+        color: u32,
+        bold: bool,
+        italic: bool,
+        strike: bool,
+    ) -> aviutl2::AnyResult<()> {
         let lua_handle = LuaHandle::new(lua_callback).context("Failed to create LuaHandle")?;
         tracing::debug!("LuaHandle created successfully");
         let text = "Hello, AviUtl!";
-        let (width, height) = lua_handle.text_width(text).context("Failed to get text width")?;
+        let (width, height) = lua_handle
+            .text_width(text)
+            .context("Failed to get text width")?;
         tracing::debug!("Text width obtained: width={}, height={}", width, height);
         Ok(())
     }

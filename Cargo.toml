@@ -8,6 +8,8 @@ crate-type = ["cdylib"]
 name = "budoux"
 
 [dependencies]
+anyhow = "1.0.102"
 aviutl2 = "0.21.0"
+aviutl2-text-parser = { git = "https://github.com/sevenc-nanashi/aviutl2-text-parser", version = "0.1.0" }
 dashmap = "6.1.0"
 lazy-regex = "3.6.0"
