@@ -1,5 +1,5 @@
 [package]
-name = "budoux"
+name = "budoux-obj2"
 version = "0.2.0"
 edition = "2024"
 
@@ -9,7 +9,11 @@ name = "budoux"
 
 [dependencies]
 anyhow = "1.0.102"
-aviutl2 = "0.21.0"
+# aviutl2 = "0.22.0"
+aviutl2 = { git = "https://github.com/sevenc-nanashi/aviutl2-rs" }
 aviutl2-text-parser = { git = "https://github.com/sevenc-nanashi/aviutl2-text-parser", version = "0.1.0" }
 dashmap = "6.1.0"
+include_json = "0.1.2"
 lazy-regex = "3.6.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"

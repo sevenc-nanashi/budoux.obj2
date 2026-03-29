@@ -1,14 +1,58 @@
 #[derive(Debug, Clone)]
 pub struct CharState {
-    char: char,
-    bold: bool,
-    italic: bool,
-    strikethrough: bool,
-    size: f64,
-    color: String,
-    font: String,
-    start_time: f64,
-    end_time: Option<f64>,
+    pub char: char,
+    pub bold: bool,
+    pub italic: bool,
+    pub strikethrough: bool,
+    pub size: f64,
+    pub color: String,
+    pub font: String,
+    pub start_time: f64,
+    pub end_time: Option<f64>,
+}
+impl CharState {
+    pub fn same_style(&self, other: &CharState) -> bool {
+        self.bold == other.bold
+            && self.italic == other.italic
+            && self.strikethrough == other.strikethrough
+            && (self.size - other.size).abs() < f64::EPSILON
+            && self.color == other.color
+            && self.font == other.font
+    }
+    pub fn to_style_control(&self) -> String {
+        let mut decoration = String::new();
+        if self.bold {
+            decoration.push('B');
+        }
+        if self.italic {
+            decoration.push('I');
+        }
+        if self.strikethrough {
+            decoration.push('S');
+        }
+        let size = &self.size;
+        let font = &self.font;
+        let color = &self.color;
+        format!("<s{size},{font},{decoration}><#{color}>")
+    }
+}
+
+pub fn char_states_to_text(char_states: &[CharState]) -> String {
+    let mut result = String::new();
+    let mut current_style: Option<&CharState> = None;
+    for char_state in char_states {
+        if let Some(current) = current_style {
+            if !current.same_style(char_state) {
+                result.push_str(&char_state.to_style_control());
+                current_style = Some(char_state);
+            }
+        } else {
+            result.push_str(&char_state.to_style_control());
+            current_style = Some(char_state);
+        }
+        result.push(char_state.char);
+    }
+    result
 }
 
 pub fn evaluate_chars(
@@ -22,11 +66,11 @@ pub fn evaluate_chars(
     let mut current_speed = base_speed;
     let mut num_chars = 0;
     for item in parsed {
-    let inv_speed = if current_speed == 0.0 {
-        0.0
-    } else {
-        1.0 / current_speed
-    };
+        let inv_speed = if current_speed == 0.0 {
+            0.0
+        } else {
+            1.0 / current_speed
+        };
         match item {
             aviutl2_text_parser::Element::Text(text) => {
                 for c in text.chars() {
@@ -34,8 +78,10 @@ pub fn evaluate_chars(
                         char: c,
                         ..current_state.clone()
                     });
-                    current_state.start_time += inv_speed;
-                    num_chars += 1;
+                    if c != '\t' && c != '\n' {
+                        current_state.start_time += inv_speed;
+                        num_chars += 1;
+                    }
                 }
             }
             aviutl2_text_parser::Element::Color { code } => {
@@ -84,7 +130,7 @@ pub fn evaluate_chars(
                 }
             },
             aviutl2_text_parser::Element::Clear { time } => {
-                let mut clear_at = match time {
+                let clear_at = match time {
                     aviutl2_text_parser::TimeValue::Absolute(v) => {
                         current_state.start_time + v + inv_speed
                     }
@@ -140,5 +186,32 @@ mod tests {
         assert_eq!(chars[7].char, 'r');
         assert_eq!(chars[7].start_time, 0.5);
         assert_eq!(chars[10].char, '!');
+    }
+
+    #[test]
+    fn test_break_tab_and_newline() {
+        let base_state = CharState {
+            char: ' ',
+            bold: false,
+            italic: false,
+            strikethrough: false,
+            size: 12.0,
+            color: "white".to_string(),
+            font: "Arial".to_string(),
+            start_time: 0.0,
+            end_time: None,
+        };
+        let text = "Line1\nLine2\tTabbed";
+        let chars = evaluate_chars(text, &base_state, 1.0).unwrap();
+        assert_eq!(chars.len(), 18);
+        assert_eq!(chars[0].char, 'L');
+        assert_eq!(chars[1].char, 'i');
+        assert_eq!(chars[1].start_time, 1.0);
+        assert_eq!(chars[5].char, '\n');
+        assert_eq!(chars[6].char, 'L');
+        assert_eq!(chars[6].start_time, 5.0);
+        assert_eq!(chars[11].char, '\t');
+        assert_eq!(chars[12].char, 'T');
+        assert_eq!(chars[12].start_time, 10.0);
     }
 }

@@ -1,12 +1,10 @@
-use std::ptr::NonNull;
+use aviutl2::{anyhow::Context, module::ScriptModuleFunctions, tracing};
+use evaluate_chars::{char_states_to_text, evaluate_chars};
 
-use aviutl2::{
-    anyhow::{self, Context},
-    module::ScriptModuleFunctions,
-    tracing,
-};
-
+mod bisect;
+mod budoux;
 mod evaluate_chars;
+mod lua_handle;
 
 #[aviutl2::plugin(ScriptModule)]
 struct BudouxMod2 {}
@@ -29,49 +27,34 @@ impl aviutl2::module::ScriptModule for BudouxMod2 {
     }
 }
 
-type LuaCallback = unsafe extern "C" fn(*const std::os::raw::c_char) -> ();
-struct LuaHandle {
-    callback: LuaCallback,
+#[derive(Debug, serde::Serialize)]
+struct Layout {
+    content: String,
+    position: (f64, f64),
 }
-unsafe impl Send for LuaHandle {}
 
-struct TextState {
+enum Align {
+    Left,
+    Center,
+    Right,
+    Justify,
+}
+
+#[derive(aviutl2::module::FromScriptModuleParam)]
+struct LayoutParams {
+    lua_callback: String,
+    width: usize,
+    align: usize,
+    justify: bool,
+    text: String,
+    size: f64,
+    letter_spacing: f64,
+    line_spacing: f64,
+    show_speed: f64,
+    font: String,
+    color: u32,
     bold: bool,
     italic: bool,
-    strike: bool,
-    size: f64,
-    font: String,
-}
-
-impl LuaHandle {
-    fn new(lua_callback: String) -> anyhow::Result<Self> {
-        let lua_callback: usize = lua_callback.trim_end_matches("LL").parse()?;
-        let callback: LuaCallback = unsafe { std::mem::transmute(lua_callback) };
-        Ok(Self { callback })
-    }
-    pub fn text_width(&self, text: &str) -> anyhow::Result<(usize, usize)> {
-        let c_string = std::ffi::CString::new(text)?;
-        unsafe { (self.callback)(c_string.as_ptr()) };
-        let result = pop_return_stack().context("Failed to pop from return stack")?;
-        result
-            .split_once(',')
-            .map(|(w, h)| {
-                let width = w.trim().parse().context("Failed to parse width")?;
-                let height = h.trim().parse().context("Failed to parse height")?;
-                Ok((width, height))
-            })
-            .context("Failed to split result")?
-    }
-}
-
-static RETURN_STACK: std::sync::Mutex<Vec<Result<String, String>>> =
-    std::sync::Mutex::new(Vec::new());
-fn pop_return_stack() -> anyhow::Result<String> {
-    let mut stack = RETURN_STACK.lock().unwrap();
-    stack
-        .pop()
-        .context("Return stack is empty")?
-        .map_err(|e| anyhow::anyhow!("Lua callback error: {e}"))
 }
 
 #[aviutl2::module::functions]
@@ -79,39 +62,93 @@ fn pop_return_stack() -> anyhow::Result<String> {
 impl BudouxMod2 {
     fn layout(
         &self,
-        lua_callback: String,
-        text: String,
-        size: f64,
-        letter_spacing: f64,
-        line_spacing: f64,
-        show_speed: f64,
-        font: String,
-        color: u32,
-        bold: bool,
-        italic: bool,
-        strike: bool,
-    ) -> aviutl2::AnyResult<()> {
-        let lua_handle = LuaHandle::new(lua_callback).context("Failed to create LuaHandle")?;
-        tracing::debug!("LuaHandle created successfully");
-        let text = "Hello, AviUtl!";
-        let (width, height) = lua_handle
-            .text_width(text)
-            .context("Failed to get text width")?;
-        tracing::debug!("Text width obtained: width={}, height={}", width, height);
-        Ok(())
+        LayoutParams {
+            lua_callback,
+            width,
+            align,
+            justify,
+            text,
+            size,
+            letter_spacing,
+            line_spacing,
+            show_speed,
+            font,
+            color,
+            bold,
+            italic,
+        }: LayoutParams,
+    ) -> aviutl2::AnyResult<String> {
+        let lua_handle =
+            lua_handle::LuaHandle::new(lua_callback).context("Failed to create LuaHandle")?;
+        let align = match align % 4 {
+            0 => Align::Left,
+            1 => Align::Center,
+            2 => Align::Right,
+            3 => Align::Justify,
+            _ => unreachable!(),
+        };
+        let chars = evaluate_chars(
+            &text,
+            &evaluate_chars::CharState {
+                char: ' ',
+                bold,
+                italic,
+                strikethrough: false,
+                size,
+                color: format!("{:06X}", color),
+                font: font.clone(),
+                start_time: 0.0,
+                end_time: None,
+            },
+            show_speed,
+        )
+        .context("Failed to evaluate characters")?;
+        tracing::debug!("evaluate_chars {chars:?}");
+        let lines = chars.into_iter().fold(vec![vec![]], |mut acc, char_state| {
+            if char_state.char == '\n' {
+                acc.push(vec![]);
+            } else {
+                acc.last_mut().unwrap().push(char_state);
+            }
+            acc
+        });
+        tracing::debug!("lines: {lines:#?}");
+        let mut base_y = 0.0_f64;
+        let mut layouts: Vec<Layout> = Vec::new();
+
+        let mut current_style: evaluate_chars::CharState = evaluate_chars::CharState {
+            char: ' ',
+            bold,
+            italic,
+            strikethrough: false,
+            size,
+            color: format!("{color:06X}"),
+            font: font.clone(),
+            start_time: 0.0,
+            end_time: None,
+        };
+        for line_chars in &lines {
+            if line_chars.is_empty() {
+                base_y += lua_handle.line_height(&current_style)? as f64 + line_spacing;
+                continue;
+            }
+            let chars = budoux::segment_char_states(line_chars);
+            aviutl2::ldbg!(chars);
+        }
+
+        Ok(serde_json::to_string(&layouts)?)
     }
 
     fn push_stack(&self, value: String) -> aviutl2::AnyResult<()> {
         tracing::debug!("push_stack called with value: {:?}", value);
-        let mut stack = RETURN_STACK.lock().unwrap();
-        stack.push(Ok(value));
+        lua_handle::push_return_stack(value).context("Failed to push to return stack")?;
         Ok(())
     }
 
     fn push_stack_error(&self, error: String) -> aviutl2::AnyResult<()> {
         tracing::debug!("push_stack_error called with error: {:?}", error);
-        let mut stack = RETURN_STACK.lock().unwrap();
-        stack.push(Err(error));
+        lua_handle::push_return_stack_error(error)
+            .context("Failed to push error to return stack")?;
         Ok(())
     }
 }

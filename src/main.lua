@@ -44,6 +44,24 @@ local bold = false
 ---$check:斜体
 local italic = false
 
+---$check:両端揃え
+local justify = false
+
+---$select:揃え
+---左揃え[上]=0
+---中央揃え[上]=1
+---右揃え[上]=2
+---強制両端揃え[上]=3
+---左揃え[中]=4
+---中央揃え[中]=5
+---右揃え[中]=6
+---強制両端揃え[中]=7
+---左揃え[下]=8
+---中央揃え[下]=9
+---右揃え[下]=10
+---強制両端揃え[下]=11
+local align = 0
+
 ---$text:テキスト
 local text = "Hello, World!"
 
@@ -60,9 +78,20 @@ local PI = {}
 local ffi = require("ffi")
 local mod = obj.module("budoux")
 
+---$embed
+local json = require("json")
+
 local function lua_callback(str)
-    local width, height = obj.load("textlayout", ffi.string(str))
-    mod.push_stack(string.format("%d,%d", width, height))
+    -- local width, height = obj.load("textlayout", ffi.string(str))
+    -- mod.push_stack(string.format("%d,%d", width, height))
+    local request = json.decode(ffi.string(str))
+    if request.type == "text_layout" then
+        local width, height = obj.load("textlayout", request.data)
+        mod.push_stack(json.encode({ width = width, height = height }))
+    else
+        print("@warn", "Unknown request type:", request.type)
+        mod.push_stack_error("Unknown request type")
+    end
 end
 
 local function lua_callback_wrapper(str)
@@ -75,7 +104,43 @@ end
 
 local callback = ffi.cast("void (*)(const char*)", lua_callback)
 local callback_address = tostring(ffi.cast("intptr_t", callback))
-local layout_success, layout_err = pcall(function() mod.layout(callback_address) end)
+local layout_success, layout_err = pcall(function()
+    print(
+        {
+            lua_callback = callback_address,
+            width = width,
+            align = align,
+            justify = justify,
+            text = text,
+            size = size,
+            letter_spacing = letter_spacing,
+            line_spacing = line_spacing,
+            show_speed = speed,
+            font = font,
+            color = color,
+            bold = bold,
+            italic = italic,
+        }
+
+    )
+    mod.layout(
+        {
+            lua_callback = callback_address,
+            width = width,
+            align = align,
+            justify = justify,
+            text = text,
+            size = size,
+            letter_spacing = letter_spacing,
+            line_spacing = line_spacing,
+            show_speed = speed,
+            font = font,
+            color = color,
+            bold = bold,
+            italic = italic,
+        }
+    )
+end)
 
 callback:free()
 if not layout_success then

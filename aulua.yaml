@@ -1,5 +1,9 @@
+# yaml-language-server: $schema=./aulua.schema.json
+
 build:
   out_dir: target
+  embed_search_dirs:
+    - src
 
 scripts:
   - name: budoux.obj2

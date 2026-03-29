@@ -5,4 +5,4 @@ cargo-prebuilt = "https://github.com/sevenc-nanashi/mise-cargo-prebuilt"
 "github:sevenc-nanashi/aviutl2-cli" = { version = "0.8.0-preview.9", bin = "au2.exe" }
 "github:EmbarkStudios/cargo-about" = { version = "latest" }
 "cargo-prebuilt:cargo-edit" = "latest"
-"github:karoterra/aviutl2-aulua" = "latest"
+"github:karoterra/aviutl2-aulua" = "0.7.1"
