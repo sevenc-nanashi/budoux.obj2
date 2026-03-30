@@ -1,3 +1,7 @@
+<div style="text-align: center;">
+    <img width="100%" src="./thumbnail.webp">
+</div>
+
 # budoux.obj2
 
 [![AviUtl2 Catalog](https://aviutl2-catalog-badge.sevenc7c.workers.dev/badge/v/sevenc-nanashi.budoux-obj2)](https://aviutl2-catalog-badge.sevenc7c.workers.dev/package/sevenc-nanashi.budoux-obj2)
