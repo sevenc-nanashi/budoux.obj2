@@ -40,10 +40,19 @@ impl CharState {
     }
 }
 
-pub fn char_states_to_text<'a, I: IntoIterator<Item = &'a CharState>>(char_states: I) -> String {
+pub fn char_states_to_text<'a, I: IntoIterator<Item = &'a CharState>>(
+    char_states: I,
+    time: f64,
+) -> String {
     let mut result = String::new();
     let mut current_style: Option<&CharState> = None;
     for char_state in char_states {
+        if char_state.start_time > time {
+            break;
+        }
+        if char_state.end_time.is_some_and(|end| end <= time) {
+            continue;
+        }
         if let Some(current) = current_style {
             if !current.same_style(char_state) {
                 result.push_str(&char_state.to_style_control());
@@ -138,23 +147,24 @@ pub fn evaluate_chars(
                     current_state.start_time += v * num_chars as f64 + inv_speed
                 }
             },
-            aviutl2_text_parser::Element::Clear { time } => {
-                let clear_at = match time {
-                    aviutl2_text_parser::TimeValue::Absolute(v) => {
-                        current_state.start_time + v + inv_speed
-                    }
-                    aviutl2_text_parser::TimeValue::PerChar(v) => {
-                        current_state.start_time + v * num_chars as f64 + inv_speed
-                    }
-                };
-
-                for char_state in chars.iter_mut().rev() {
-                    if char_state.end_time.is_none() {
-                        char_state.end_time = Some(clear_at);
-                    } else {
-                        break;
-                    }
-                }
+            aviutl2_text_parser::Element::Clear { .. } => {
+                anyhow::bail!("Clear control is not supported");
+                // let clear_at = match time {
+                //     aviutl2_text_parser::TimeValue::Absolute(v) => {
+                //         current_state.start_time + v + inv_speed
+                //     }
+                //     aviutl2_text_parser::TimeValue::PerChar(v) => {
+                //         current_state.start_time + v * num_chars as f64 + inv_speed
+                //     }
+                // };
+                //
+                // for char_state in chars.iter_mut().rev() {
+                //     if char_state.end_time.is_none() {
+                //         char_state.end_time = Some(clear_at);
+                //     } else {
+                //         break;
+                //     }
+                // }
             }
             aviutl2_text_parser::Element::Position { .. } => {
                 anyhow::bail!("Position control is not supported");

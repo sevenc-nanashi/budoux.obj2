@@ -44,7 +44,8 @@ local line_spacing = 0
 ---min=0
 ---max=100
 ---step=0.01
-local speed = 1
+---zero_label=瞬時
+local speed = 0
 
 
 --group:フォント
@@ -158,6 +159,7 @@ local layout_success, layout_json_or_err, height = pcall(function()
             outline_size = outline_size,
             bold = bold,
             italic = italic,
+            time = obj.time
         }
     )
 end)

@@ -52,6 +52,7 @@ pub struct LayoutParams {
     pub decoration: FullTextDecoration,
     pub bold: bool,
     pub italic: bool,
+    pub time: f64,
 }
 
 #[derive(Debug)]
@@ -100,6 +101,7 @@ fn build_wrapped_lines(
                         .chain(segment.chars.iter())
                         .cloned()
                         .collect::<Vec<_>>(),
+                    f64::INFINITY,
                 );
                 let (segment_width, _) =
                     lua_handle.text_layout(&segment_text, decoration, char_spacing)?;
@@ -163,6 +165,7 @@ fn layout_wrapped_lines(
     decoration: FullTextDecoration,
     line_spacing: f64,
     char_spacing: f64,
+    time: f64,
 ) -> aviutl2::AnyResult<(Vec<Layout>, f64)> {
     let mut line_y = 0.0_f64;
     let mut layouts: Vec<Layout> = Vec::new();
@@ -175,8 +178,10 @@ fn layout_wrapped_lines(
         let current_line_text = format!(
             "{}{}",
             current_style.to_style_control(),
-            crate::evaluate_chars::char_states_to_text(line_chars)
+            crate::evaluate_chars::char_states_to_text(line_chars, f64::INFINITY)
         );
+        let visible_current_line_text =
+            crate::evaluate_chars::char_states_to_text(line_chars, time);
         current_style = line_chars
             .last()
             .map_or(current_style.clone(), |c| c.clone());
@@ -187,17 +192,19 @@ fn layout_wrapped_lines(
         };
         let (line_width, line_height) =
             lua_handle.text_layout(&current_line_text, decoration, char_spacing)?;
-        if line_chars.is_empty() {
+        if visible_current_line_text.is_empty() {
             // 空行の場合は高さだけを確保して次の行へ
             line_y += line_height as f64 + line_spacing;
             continue;
         }
+        let (visible_line_width, _) =
+            lua_handle.text_layout(&visible_current_line_text, decoration, char_spacing)?;
         let y = line_y + line_height as f64 / 2.0;
         match horizontal_align {
             HorizontalAlign::Justify if line_chars.len() == 1 => {
                 // 1文字しかない場合は両端揃えできないので中央揃えにする
                 layouts.push(Layout {
-                    content: current_line_text,
+                    content: visible_current_line_text,
                     position: (width as f64 / 2.0 - line_width as f64 / 2.0, y),
                 });
             }
@@ -210,31 +217,56 @@ fn layout_wrapped_lines(
                     if prev_style.is_none_or(|prev| !prev.same_style(c)) {
                         draw_text.push_str(&c.to_style_control());
                     }
-                    draw_text.push(c.char);
+                    if ((c.start_time)..=(c.end_time.unwrap_or(f64::INFINITY))).contains(&time) {
+                        draw_text.push(c.char);
+                    } else {
+                        let (base_char_width, _) = lua_handle.text_layout(
+                            &format!("{} ", c.to_style_control()),
+                            decoration,
+                            char_spacing,
+                        )?;
+                        let (char_width, _) = lua_handle.text_layout(
+                            &format!("{} {}", c.to_style_control(), c.char),
+                            decoration,
+                            char_spacing,
+                        )?;
+                        draw_text.push_str(&format!(
+                            "<p+{:.2},+0>",
+                            (char_width - base_char_width) as f64,
+                        ));
+                    }
                     draw_text.push_str(&format!("<p+{:.2},+0>", space_between_chars));
                     prev_style = Some(c.clone());
                 }
+                let (draw_text_width, _) =
+                    lua_handle.text_layout(&draw_text, decoration, char_spacing)?;
                 layouts.push(Layout {
                     content: draw_text,
-                    position: (width as f64 / 2.0, y),
+                    position: (draw_text_width as f64 / 2.0, y),
                 });
             }
             HorizontalAlign::Left => {
                 layouts.push(Layout {
-                    content: current_line_text,
-                    position: (line_width as f64 / 2.0, y),
+                    content: visible_current_line_text,
+                    position: (visible_line_width as f64 / 2.0, y),
                 });
             }
             HorizontalAlign::Center => {
                 layouts.push(Layout {
-                    content: current_line_text,
-                    position: (width as f64 / 2.0, y),
+                    content: visible_current_line_text,
+                    position: (
+                        width as f64 / 2.0 - (line_width as f64 - visible_line_width as f64) / 2.0,
+                        y,
+                    ),
                 });
             }
             HorizontalAlign::Right => {
                 layouts.push(Layout {
-                    content: current_line_text,
-                    position: (width as f64 - line_width as f64 / 2.0, y),
+                    content: visible_current_line_text,
+                    position: (
+                        width as f64 - (line_width as f64 - visible_line_width as f64) / 2.0,
+                        y,
+                    ),
                 });
             }
         }
@@ -263,6 +295,7 @@ pub fn layout(
         decoration,
         bold,
         italic,
+        time,
     }: LayoutParams,
 ) -> aviutl2::AnyResult<(String, f64)> {
     let lua_handle = LuaHandle::new(lua_callback).context("Failed to create LuaHandle")?;
@@ -323,6 +356,7 @@ pub fn layout(
         decoration,
         line_spacing,
         char_spacing,
+        time,
     )?;
     tracing::trace!("layouts: {layouts:#?}, height: {height}");
 
