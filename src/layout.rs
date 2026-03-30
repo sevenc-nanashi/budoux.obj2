@@ -226,7 +226,7 @@ fn layout_wrapped_lines(
                 // 1文字しかない場合は両端揃えできないので中央揃えにする
                 layouts.push(Layout {
                     content: visible_current_line_text,
-                    position: (width as f64 / 2.0 - line_width as f64 / 2.0, y),
+                    position: (width as f64 / 2.0, y),
                 });
             }
             HorizontalAlign::Justify => {
