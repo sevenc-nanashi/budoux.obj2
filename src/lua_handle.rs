@@ -6,15 +6,6 @@ pub struct LuaHandle {
 }
 unsafe impl Send for LuaHandle {}
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-struct TextState {
-    bold: bool,
-    italic: bool,
-    strike: bool,
-    size: f64,
-    font: String,
-}
-
 static RETURN_STACK: std::sync::Mutex<Vec<Result<String, String>>> =
     std::sync::Mutex::new(Vec::new());
 pub fn push_return_stack(value: String) -> anyhow::Result<()> {
@@ -43,10 +34,21 @@ enum LuaRequest {
     TextLayout {
         text: String,
         decoration: FullTextDecoration,
+        letter_spacing: f64,
     },
 }
 
-#[derive(Debug, Copy, Clone, Default, serde_repr::Serialize_repr, serde_repr::Deserialize_repr)]
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    Default,
+    serde_repr::Serialize_repr,
+    serde_repr::Deserialize_repr,
+    PartialEq,
+    Eq,
+    Hash,
+)]
 #[repr(u8)]
 pub enum FullTextDecoration {
     #[default]
@@ -67,10 +69,15 @@ impl<'a> aviutl2::module::FromScriptModuleParamTable<'a> for FullTextDecoration 
         use serde::Deserialize;
         use serde::de::IntoDeserializer;
         let value = param.get_int(key);
-        let deserializer: serde::de::value::I32Deserializer<serde::de::value::Error> = value.into_deserializer();
+        let deserializer: serde::de::value::I32Deserializer<serde::de::value::Error> =
+            value.into_deserializer();
         Self::deserialize(deserializer).ok()
     }
 }
+
+type LayoutCacheKey = (String, FullTextDecoration, u64);
+static LAYOUT_CACHE: std::sync::LazyLock<dashmap::DashMap<LayoutCacheKey, (usize, usize)>> =
+    std::sync::LazyLock::new(dashmap::DashMap::new);
 
 impl LuaHandle {
     pub fn new(lua_callback: String) -> anyhow::Result<Self> {
@@ -82,10 +89,20 @@ impl LuaHandle {
         &self,
         styled_text: &str,
         decoration: FullTextDecoration,
+        letter_spacing: f64,
     ) -> anyhow::Result<(usize, usize)> {
+        let cache_key = (
+            styled_text.to_string(),
+            decoration,
+            letter_spacing.to_bits(),
+        );
+        if let Some(cached) = LAYOUT_CACHE.get(&cache_key) {
+            return Ok(*cached);
+        }
         let request = LuaRequest::TextLayout {
             text: styled_text.to_string(),
             decoration,
+            letter_spacing,
         };
         let json = serde_json::to_string(&request)?;
         let c_string = std::ffi::CString::new(json)?;
@@ -97,15 +114,8 @@ impl LuaHandle {
         }
         let result =
             pop_return_stack::<ReturnValue>().context("Failed to pop from return stack")?;
+
+        LAYOUT_CACHE.insert(cache_key, (result.width, result.height));
         Ok((result.width, result.height))
-    }
-    pub fn line_height(
-        &self,
-        style: &crate::evaluate_chars::CharState,
-        decoration: FullTextDecoration,
-    ) -> anyhow::Result<usize> {
-        let (_, h1) = self.text_layout(&style.to_style_control(), decoration)?;
-        let (_, h2) = self.text_layout(&format!("{}\n", style.to_style_control()), decoration)?;
-        Ok(h2 - h1)
     }
 }

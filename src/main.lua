@@ -106,12 +106,12 @@ local function lua_callback(str)
     -- mod.push_stack(string.format("%d,%d", width, height))
     local request = json.decode(ffi.string(str))
     if debug then
-        print("@debug", "Received callback:", request)
+        print("@verbose", "Received callback:", request)
     end
     if request.type == "text_layout" then
-        obj.setfont("", 0, decoration, 0, 0, false, false, letter_spacing)
-        local width, height = obj.load("textlayout", request.data.text)
-        mod.push_stack(json.encode({ width = width, height = height }))
+        obj.setfont("", 0, request.data.decoration, 0, 0, false, false, request.data.letter_spacing)
+        local text_width, text_height = obj.load("textlayout", request.data.text)
+        mod.push_stack(json.encode({ width = text_width, height = text_height }))
     else
         print("@warn", "Unknown request type:", request.type)
         mod.push_stack_error("Unknown request type")
@@ -139,12 +139,12 @@ end
 
 local callback = ffi.cast("void (*)(const char*)", lua_callback_wrapper)
 local callback_address = tostring(ffi.cast("intptr_t", callback))
-local layout_success, layout_err = pcall(function()
-    mod.layout(
+local layout_success, layout_json_or_err, height = pcall(function()
+    return mod.layout(
         {
             lua_callback = callback_address,
             width = width,
-            align = align,
+            align = align % 4,
             justify = justify,
             text = text,
             size = size,
@@ -164,5 +164,16 @@ end)
 
 callback:free()
 if not layout_success then
-    print("@error", "Failed to initialize text layout:", layout_err)
+    error("Layout error: " .. tostring(layout_json_or_err))
 end
+local layout = json.decode(layout_json_or_err)
+
+local vertical_align = math.floor(align / 4)
+obj.setoption("drawtarget", "tempbuffer", width, height)
+obj.setfont("", 0, decoration, 0, 0, false, false, letter_spacing)
+for _, item in ipairs(layout) do
+    obj.load("text", item.content)
+    obj.draw(item.position[1] - width / 2, item.position[2] - height / 2)
+end
+obj.setoption("drawtarget", "framebuffer")
+obj.load("tempbuffer")

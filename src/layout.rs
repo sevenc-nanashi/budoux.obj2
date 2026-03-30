@@ -10,6 +10,7 @@ pub struct Layout {
     position: (f64, f64),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HorizontalAlign {
     Left,
     Center,
@@ -17,40 +18,19 @@ pub enum HorizontalAlign {
     Justify,
 }
 
-pub enum VerticalAlign {
-    Top,
-    Middle,
-    Bottom,
-}
-
-pub struct Align {
-    pub horizontal: HorizontalAlign,
-    pub vertical: VerticalAlign,
-}
-
-impl<'a> aviutl2::module::FromScriptModuleParamTable<'a> for Align {
+impl<'a> aviutl2::module::FromScriptModuleParamTable<'a> for HorizontalAlign {
     fn from_param_table(
         param: &'a aviutl2::module::ScriptModuleParamTable,
         key: &str,
     ) -> Option<Self> {
         let value = param.get_int(key);
-        let horizontal = match value % 4 {
-            0 => HorizontalAlign::Left,
-            1 => HorizontalAlign::Center,
-            2 => HorizontalAlign::Right,
-            3 => HorizontalAlign::Justify,
-            _ => unreachable!(),
-        };
-        let vertical = match value / 4 % 3 {
-            0 => VerticalAlign::Top,
-            1 => VerticalAlign::Middle,
-            2 => VerticalAlign::Bottom,
-            _ => unreachable!(),
-        };
-        Some(Self {
-            horizontal,
-            vertical,
-        })
+        match value {
+            0 => Some(Self::Left),
+            1 => Some(Self::Center),
+            2 => Some(Self::Right),
+            3 => Some(Self::Justify),
+            _ => None,
+        }
     }
 }
 
@@ -58,12 +38,12 @@ impl<'a> aviutl2::module::FromScriptModuleParamTable<'a> for Align {
 pub struct LayoutParams {
     pub lua_callback: String,
     pub width: usize,
-    pub align: Align,
+    pub align: HorizontalAlign,
     pub justify: bool,
     pub text: String,
     pub size: f64,
-    pub letter_spacing: f64,
     pub line_spacing: f64,
+    pub char_spacing: f64,
     pub show_speed: f64,
     pub font: String,
     pub color: u32,
@@ -77,24 +57,21 @@ pub struct LayoutParams {
 fn build_wrapped_lines(
     lines: &[Vec<crate::evaluate_chars::CharState>],
     lua_handle: &LuaHandle,
-    current_style: &crate::evaluate_chars::CharState,
     decoration: FullTextDecoration,
-    line_spacing: f64,
+    char_spacing: f64,
     width: usize,
 ) -> aviutl2::AnyResult<Vec<Vec<crate::evaluate_chars::CharState>>> {
-    let mut base_y = 0.0_f64;
     let mut wrapped_lines: Vec<Vec<crate::evaluate_chars::CharState>> = Vec::new();
     for line_chars in lines {
         if line_chars.is_empty() {
-            base_y += lua_handle.line_height(current_style, decoration)? as f64 + line_spacing;
+            wrapped_lines.push(vec![]);
             continue;
         }
         let mut segmented = segment::segment(line_chars)
             .into_iter()
             .collect::<std::collections::VecDeque<_>>();
-        let mut available_width = width as f64;
         let mut current_line = vec![];
-        tracing::debug!("Processing line: {line_chars:#?}");
+        tracing::trace!("Processing line: {line_chars:#?}");
         while let Some(segment) = segmented.pop_front() {
             'try_push: loop {
                 let segment_text = char_states_to_text(
@@ -112,8 +89,9 @@ fn build_wrapped_lines(
                         .cloned()
                         .collect::<Vec<_>>(),
                 );
-                let (segment_width, _) = lua_handle.text_layout(&segment_text, decoration)?;
-                if segment_width as f64 > available_width {
+                let (segment_width, _) =
+                    lua_handle.text_layout(&segment_text, decoration, char_spacing)?;
+                if segment_width > width {
                     if current_line.is_empty() {
                         if segment.chars.len() == 1 {
                             // 1文字も入らない場合はその文字だけで改行する
@@ -135,7 +113,6 @@ fn build_wrapped_lines(
                     let mut new_line = vec![];
                     std::mem::swap(&mut current_line, &mut new_line);
                     wrapped_lines.push(new_line);
-                    available_width = width as f64;
                 } else {
                     if let segment::WrappedBy::Whitespace(ref chars) = segment.wrapped_by
                         && !current_line.is_empty()
@@ -143,7 +120,6 @@ fn build_wrapped_lines(
                         current_line.extend(chars.clone());
                     }
                     current_line.extend(segment.chars.clone());
-                    available_width -= segment_width as f64;
                     break 'try_push;
                 }
             }
@@ -155,6 +131,94 @@ fn build_wrapped_lines(
     Ok(wrapped_lines)
 }
 
+#[expect(clippy::too_many_arguments)]
+fn layout_wrapped_lines(
+    wrapped_lines: &[Vec<crate::evaluate_chars::CharState>],
+    lua_handle: &LuaHandle,
+    current_style: &crate::evaluate_chars::CharState,
+    width: usize,
+    align: &HorizontalAlign,
+    justify: bool,
+    decoration: FullTextDecoration,
+    line_spacing: f64,
+    char_spacing: f64,
+) -> aviutl2::AnyResult<(Vec<Layout>, f64)> {
+    let mut line_y = 0.0_f64;
+    let mut layouts: Vec<Layout> = Vec::new();
+    let mut current_style = current_style.clone();
+    for (i, line_chars) in wrapped_lines.iter().enumerate() {
+        let current_line_text = format!(
+            "{}{}",
+            current_style.to_style_control(),
+            crate::evaluate_chars::char_states_to_text(line_chars)
+        );
+        current_style = line_chars
+            .last()
+            .map_or(current_style.clone(), |c| c.clone());
+        let horizontal_align = if justify && i != wrapped_lines.len() - 1 {
+            HorizontalAlign::Justify
+        } else {
+            *align
+        };
+        let (line_width, line_height) =
+            lua_handle.text_layout(&current_line_text, decoration, char_spacing)?;
+        let y = line_y + line_height as f64 / 2.0;
+        match horizontal_align {
+            HorizontalAlign::Justify if line_chars.len() == 1 => {
+                // 1文字しかない場合は両端揃えできないので中央揃えにする
+                layouts.push(Layout {
+                    content: current_line_text,
+                    position: (width as f64 / 2.0 - line_width as f64 / 2.0, y),
+                });
+            }
+            HorizontalAlign::Justify => {
+                let char_widths = line_chars
+                    .iter()
+                    .map(|c| {
+                        let text = char_states_to_text(std::iter::once(c));
+                        let (w, _) = lua_handle.text_layout(&text, decoration, char_spacing)?;
+                        Ok(w as f64)
+                    })
+                    .collect::<aviutl2::AnyResult<Vec<f64>>>()?;
+                let total_char_width: f64 = char_widths.iter().sum();
+                let extra_space = width as f64 - total_char_width;
+                let space_between_chars = extra_space / (line_chars.len() - 1) as f64;
+                let mut x = 0.0;
+                for (c, char_width) in line_chars.iter().zip(char_widths.iter()) {
+                    let text = char_states_to_text(std::iter::once(c));
+                    layouts.push(Layout {
+                        content: text,
+                        position: (x + char_width / 2.0, y),
+                    });
+                    x += char_width + space_between_chars;
+                }
+            }
+            HorizontalAlign::Left => {
+                layouts.push(Layout {
+                    content: current_line_text,
+                    position: (line_width as f64 / 2.0, y),
+                });
+            }
+            HorizontalAlign::Center => {
+                layouts.push(Layout {
+                    content: current_line_text,
+                    position: (width as f64 / 2.0, y),
+                });
+            }
+            HorizontalAlign::Right => {
+                layouts.push(Layout {
+                    content: current_line_text,
+                    position: (width as f64 - line_width as f64 / 2.0, y),
+                });
+            }
+        }
+        line_y += line_height as f64 + line_spacing;
+    }
+    line_y -= line_spacing;
+
+    Ok((layouts, line_y))
+}
+
 pub fn layout(
     LayoutParams {
         lua_callback,
@@ -163,8 +227,8 @@ pub fn layout(
         justify,
         text,
         size,
-        letter_spacing,
         line_spacing,
+        char_spacing,
         show_speed,
         font,
         color,
@@ -174,9 +238,8 @@ pub fn layout(
         bold,
         italic,
     }: LayoutParams,
-) -> aviutl2::AnyResult<String> {
-    let lua_handle =
-        LuaHandle::new(lua_callback).context("Failed to create LuaHandle")?;
+) -> aviutl2::AnyResult<(String, f64)> {
+    let lua_handle = LuaHandle::new(lua_callback).context("Failed to create LuaHandle")?;
     let chars = evaluate_chars(
         &text,
         &crate::evaluate_chars::CharState {
@@ -195,7 +258,7 @@ pub fn layout(
         show_speed,
     )
     .context("Failed to evaluate characters")?;
-    tracing::debug!("evaluate_chars {chars:?}");
+    tracing::trace!("evaluate_chars {chars:?}");
     let lines = chars.into_iter().fold(vec![vec![]], |mut acc, char_state| {
         if char_state.char == '\n' {
             acc.push(vec![]);
@@ -204,11 +267,13 @@ pub fn layout(
         }
         acc
     });
-    tracing::debug!("lines: {lines:#?}");
-    let mut base_y = 0.0_f64;
-    let mut layouts: Vec<Layout> = Vec::new();
+    tracing::trace!("lines: {lines:#?}");
 
-    let mut current_style: crate::evaluate_chars::CharState = crate::evaluate_chars::CharState {
+    let wrapped_lines = build_wrapped_lines(&lines, &lua_handle, decoration, char_spacing, width)
+        .context("Failed to build wrapped lines")?;
+    tracing::trace!("wrapped_lines: {wrapped_lines:#?}");
+
+    let current_style: crate::evaluate_chars::CharState = crate::evaluate_chars::CharState {
         char: ' ',
         bold,
         italic,
@@ -222,15 +287,20 @@ pub fn layout(
         end_time: None,
     };
 
-    let wrapped_lines = build_wrapped_lines(
-        &lines,
+    let (layouts, height) = layout_wrapped_lines(
+        &wrapped_lines,
         &lua_handle,
         &current_style,
+        width,
+        &align,
+        justify,
         decoration,
         line_spacing,
-        width,
+        char_spacing,
     )?;
-    tracing::debug!("wrapped_lines: {wrapped_lines:#?}");
 
-    Ok(serde_json::to_string(&layouts)?)
+    Ok((
+        serde_json::to_string(&layouts).context("Failed to serialize layouts")?,
+        height,
+    ))
 }

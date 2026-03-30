@@ -28,13 +28,14 @@ impl aviutl2::module::ScriptModule for BudouxMod2 {
     }
 }
 
-// NOTE: 0.15
-
 #[aviutl2::module::functions]
 #[allow(clippy::too_many_arguments)]
 impl BudouxMod2 {
-    fn layout(&self, params: layout::LayoutParams) -> aviutl2::AnyResult<String> {
-        layout::layout(params)
+    fn layout(&self, params: layout::LayoutParams) -> aviutl2::AnyResult<(String, f64)> {
+        let current = std::time::Instant::now();
+        let res = layout::layout(params);
+        tracing::debug!("layout executed in {:?}", current.elapsed());
+        res
     }
 
     fn push_stack(&self, value: String) -> aviutl2::AnyResult<()> {
