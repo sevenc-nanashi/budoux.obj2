@@ -1,10 +1,12 @@
 use aviutl2::{anyhow::Context, module::ScriptModuleFunctions, tracing};
 use evaluate_chars::{char_states_to_text, evaluate_chars};
+use lua_handle::FullTextDecoration;
 
 mod bisect;
 mod budoux;
 mod evaluate_chars;
 mod lua_handle;
+mod segment;
 
 #[aviutl2::plugin(ScriptModule)]
 struct BudouxMod2 {}
@@ -33,18 +35,54 @@ struct Layout {
     position: (f64, f64),
 }
 
-enum Align {
+enum HorizontalAlign {
     Left,
     Center,
     Right,
     Justify,
 }
 
+enum VerticalAlign {
+    Top,
+    Middle,
+    Bottom,
+}
+struct Align {
+    horizontal: HorizontalAlign,
+    vertical: VerticalAlign,
+}
+
+impl<'a> aviutl2::module::FromScriptModuleParamTable<'a> for Align {
+    fn from_param_table(
+        param: &'a aviutl2::module::ScriptModuleParamTable,
+        key: &str,
+    ) -> Option<Self> {
+        let value = param.get_int(key);
+        let horizontal = match value % 4 {
+            0 => HorizontalAlign::Left,
+            1 => HorizontalAlign::Center,
+            2 => HorizontalAlign::Right,
+            3 => HorizontalAlign::Justify,
+            _ => unreachable!(),
+        };
+        let vertical = match value / 4 % 3 {
+            0 => VerticalAlign::Top,
+            1 => VerticalAlign::Middle,
+            2 => VerticalAlign::Bottom,
+            _ => unreachable!(),
+        };
+        Some(Self {
+            horizontal,
+            vertical,
+        })
+    }
+}
+
 #[derive(aviutl2::module::FromScriptModuleParam)]
 struct LayoutParams {
     lua_callback: String,
     width: usize,
-    align: usize,
+    align: Align,
     justify: bool,
     text: String,
     size: f64,
@@ -53,9 +91,14 @@ struct LayoutParams {
     show_speed: f64,
     font: String,
     color: u32,
+    secondary_color: u32,
+    outline_size: f64,
+    decoration: FullTextDecoration,
     bold: bool,
     italic: bool,
 }
+
+// NOTE: 0.15
 
 #[aviutl2::module::functions]
 #[allow(clippy::too_many_arguments)]
@@ -74,19 +117,15 @@ impl BudouxMod2 {
             show_speed,
             font,
             color,
+            secondary_color,
+            outline_size,
+            decoration,
             bold,
             italic,
         }: LayoutParams,
     ) -> aviutl2::AnyResult<String> {
         let lua_handle =
             lua_handle::LuaHandle::new(lua_callback).context("Failed to create LuaHandle")?;
-        let align = match align % 4 {
-            0 => Align::Left,
-            1 => Align::Center,
-            2 => Align::Right,
-            3 => Align::Justify,
-            _ => unreachable!(),
-        };
         let chars = evaluate_chars(
             &text,
             &evaluate_chars::CharState {
@@ -96,6 +135,8 @@ impl BudouxMod2 {
                 strikethrough: false,
                 size,
                 color: format!("{:06X}", color),
+                secondary_color: format!("{:06X}", secondary_color),
+                outline_size,
                 font: font.clone(),
                 start_time: 0.0,
                 end_time: None,
@@ -123,18 +164,84 @@ impl BudouxMod2 {
             strikethrough: false,
             size,
             color: format!("{color:06X}"),
+            secondary_color: format!("{secondary_color:06X}"),
+            outline_size,
             font: font.clone(),
             start_time: 0.0,
             end_time: None,
         };
+
+        let mut wrapped_lines: Vec<Vec<evaluate_chars::CharState>> = Vec::new();
         for line_chars in &lines {
             if line_chars.is_empty() {
-                base_y += lua_handle.line_height(&current_style)? as f64 + line_spacing;
+                base_y += lua_handle.line_height(&current_style, decoration)? as f64 + line_spacing;
                 continue;
             }
-            let chars = budoux::segment_char_states(line_chars);
-            aviutl2::ldbg!(chars);
+            let mut segmented = segment::segment(line_chars)
+                .into_iter()
+                .collect::<std::collections::VecDeque<_>>();
+            let mut available_width = width as f64;
+            let mut current_line = vec![];
+            tracing::debug!("Processing line: {line_chars:#?}");
+            while let Some(segment) = segmented.pop_front() {
+                'try_push: loop {
+                    let segment_text = char_states_to_text(
+                        &current_line
+                            .iter()
+                            .chain(match segment.wrapped_by {
+                                segment::WrappedBy::Whitespace(ref chars)
+                                    if !current_line.is_empty() =>
+                                {
+                                    chars.iter()
+                                }
+                                _ => [].iter(),
+                            })
+                            .chain(segment.chars.iter())
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                    );
+                    let (segment_width, _) = lua_handle.text_layout(&segment_text, decoration)?;
+                    if segment_width as f64 > available_width {
+                        if current_line.is_empty() {
+                            if segment.chars.len() == 1 {
+                                // 1文字も入らない場合はその文字だけで改行する
+                                wrapped_lines.push(segment.chars.clone());
+                                break 'try_push;
+                            } else {
+                                // 1文字も入らない場合は1文字ごとに分割する
+                                for char_state in segment.chars.into_iter().rev() {
+                                    segmented.push_front(segment::Segment {
+                                        chars: vec![char_state],
+                                        wrapped_by: segment::WrappedBy::Overflow,
+                                    });
+                                }
+                                segmented.front_mut().unwrap().wrapped_by = segment.wrapped_by;
+                                break 'try_push;
+                            }
+                        }
+
+                        let mut new_line = vec![];
+                        std::mem::swap(&mut current_line, &mut new_line);
+                        wrapped_lines.push(new_line);
+                        available_width = width as f64;
+                    } else {
+                        if let segment::WrappedBy::Whitespace(ref chars) = segment.wrapped_by
+                            && !current_line.is_empty()
+                        {
+                            current_line.extend(chars.clone());
+                        }
+                        current_line.extend(segment.chars.clone());
+                        available_width -= segment_width as f64;
+                        break 'try_push;
+                    }
+                }
+            }
+            if !current_line.is_empty() {
+                wrapped_lines.push(current_line);
+            }
         }
+
+        tracing::debug!("wrapped_lines: {wrapped_lines:#?}");
 
         Ok(serde_json::to_string(&layouts)?)
     }

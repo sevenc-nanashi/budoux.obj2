@@ -40,7 +40,36 @@ fn pop_return_stack<T: serde::de::DeserializeOwned>() -> anyhow::Result<T> {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 enum LuaRequest {
-    TextLayout(String),
+    TextLayout {
+        text: String,
+        decoration: FullTextDecoration,
+    },
+}
+
+#[derive(Debug, Copy, Clone, Default, serde_repr::Serialize_repr, serde_repr::Deserialize_repr)]
+#[repr(u8)]
+pub enum FullTextDecoration {
+    #[default]
+    Normal = 0,
+    Shadow,
+    LightShadow,
+    Outlined,
+    ThinOutlined,
+    BoldOutlined,
+    SquareOutlined,
+}
+
+impl<'a> aviutl2::module::FromScriptModuleParamTable<'a> for FullTextDecoration {
+    fn from_param_table(
+        param: &'a aviutl2::module::ScriptModuleParamTable,
+        key: &str,
+    ) -> Option<Self> {
+        use serde::Deserialize;
+        use serde::de::IntoDeserializer;
+        let value = param.get_int(key);
+        let deserializer: serde::de::value::I32Deserializer<serde::de::value::Error> = value.into_deserializer();
+        Self::deserialize(deserializer).ok()
+    }
 }
 
 impl LuaHandle {
@@ -49,8 +78,15 @@ impl LuaHandle {
         let callback: LuaCallback = unsafe { std::mem::transmute(lua_callback) };
         Ok(Self { callback })
     }
-    pub fn text_layout(&self, styled_text: &str) -> anyhow::Result<(usize, usize)> {
-        let request = LuaRequest::TextLayout(styled_text.to_string());
+    pub fn text_layout(
+        &self,
+        styled_text: &str,
+        decoration: FullTextDecoration,
+    ) -> anyhow::Result<(usize, usize)> {
+        let request = LuaRequest::TextLayout {
+            text: styled_text.to_string(),
+            decoration,
+        };
         let json = serde_json::to_string(&request)?;
         let c_string = std::ffi::CString::new(json)?;
         unsafe { (self.callback)(c_string.as_ptr()) };
@@ -63,9 +99,13 @@ impl LuaHandle {
             pop_return_stack::<ReturnValue>().context("Failed to pop from return stack")?;
         Ok((result.width, result.height))
     }
-    pub fn line_height(&self, style: &crate::evaluate_chars::CharState) -> anyhow::Result<usize> {
-        let (_, h1) = self.text_layout(&style.to_style_control())?;
-        let (_, h2) = self.text_layout(&format!("{}\n", style.to_style_control(),))?;
+    pub fn line_height(
+        &self,
+        style: &crate::evaluate_chars::CharState,
+        decoration: FullTextDecoration,
+    ) -> anyhow::Result<usize> {
+        let (_, h1) = self.text_layout(&style.to_style_control(), decoration)?;
+        let (_, h2) = self.text_layout(&format!("{}\n", style.to_style_control()), decoration)?;
         Ok(h2 - h1)
     }
 }

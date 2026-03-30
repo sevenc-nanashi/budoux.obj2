@@ -1,4 +1,4 @@
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CharState {
     pub char: char,
     pub bold: bool,
@@ -6,6 +6,8 @@ pub struct CharState {
     pub strikethrough: bool,
     pub size: f64,
     pub color: String,
+    pub secondary_color: String,
+    pub outline_size: f64,
     pub font: String,
     pub start_time: f64,
     pub end_time: Option<f64>,
@@ -33,11 +35,12 @@ impl CharState {
         let size = &self.size;
         let font = &self.font;
         let color = &self.color;
-        format!("<s{size},{font},{decoration}><#{color}>")
+        let secondary_color = &self.secondary_color;
+        format!("<s{size},{font},{decoration}><#{color},{secondary_color}>")
     }
 }
 
-pub fn char_states_to_text(char_states: &[CharState]) -> String {
+pub fn char_states_to_text<'a, I: IntoIterator<Item = &'a CharState>>(char_states: I) -> String {
     let mut result = String::new();
     let mut current_style: Option<&CharState> = None;
     for char_state in char_states {
@@ -88,7 +91,10 @@ pub fn evaluate_chars(
                 current_state.color = match code {
                     aviutl2_text_parser::ColorType::Default => base_state.color.clone(),
                     aviutl2_text_parser::ColorType::Single(color_value) => color_value.to_string(),
-                    aviutl2_text_parser::ColorType::Pair(color_value, _) => color_value.to_string(),
+                    aviutl2_text_parser::ColorType::Pair(color_value, secondary_color_value) => {
+                        current_state.secondary_color = secondary_color_value.to_string();
+                        color_value.to_string()
+                    }
                 };
             }
             aviutl2_text_parser::Element::Size {
@@ -147,10 +153,10 @@ pub fn evaluate_chars(
                     }
                 }
             }
-            aviutl2_text_parser::Element::Position { x, y, z } => {
+            aviutl2_text_parser::Element::Position { .. } => {
                 anyhow::bail!("Position control is not supported");
             }
-            aviutl2_text_parser::Element::Script { code } => {
+            aviutl2_text_parser::Element::Script { .. } => {
                 anyhow::bail!("Script control is not supported");
             }
         }
@@ -172,6 +178,8 @@ mod tests {
             strikethrough: false,
             size: 12.0,
             color: "white".to_string(),
+            secondary_color: "black".to_string(),
+            outline_size: 0.0,
             font: "Arial".to_string(),
             start_time: 0.0,
             end_time: None,
@@ -197,6 +205,8 @@ mod tests {
             strikethrough: false,
             size: 12.0,
             color: "white".to_string(),
+            secondary_color: "black".to_string(),
+            outline_size: 0.0,
             font: "Arial".to_string(),
             start_time: 0.0,
             end_time: None,
