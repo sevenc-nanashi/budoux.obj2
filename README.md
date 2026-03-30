@@ -42,3 +42,7 @@ PIによって設定された値はトラックバーによる指定より優先
 ## ライセンス
 
 MIT License で公開しています。詳細は [LICENSE](LICENSE) を参照してください。
+
+## 謝辞
+
+このスクリプトは [budoux](https://github.com/google/budoux) をベースにしています。
