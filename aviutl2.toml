@@ -43,7 +43,7 @@ source = "target/release/budoux.dll"
 [catalog]
 id = "sevenc-nanashi.budoux-obj2"
 name = "budoux.obj2"
-summary = "画像のパーツを分解して個別オブジェクトにするスクリプト"
+summary = "横幅を指定してテキストを折り返すスクリプト"
 type = "common"
 description = { type = "url", url = "https://raw.githubusercontent.com/sevenc-nanashi/budoux.obj2/main/README.md" }
 author = "Nanashi."
@@ -54,4 +54,4 @@ license = { type = "MIT", template = false, text = { type = "file", path = "./LI
 [release]
 prebuild = ["cargo about generate ./about.hbs -o ./release/package.txt"]
 package_template = "./release/package.txt"
-package_information = "{name} v{version} / 画像のパーツを分解して個別オブジェクトにするスクリプト"
+package_information = "{name} v{version} / 横幅を指定してテキストを折り返すスクリプト"

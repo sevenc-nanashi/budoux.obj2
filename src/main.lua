@@ -95,6 +95,21 @@ local debug = false
 local PI = {}
 
 -- PIからパラメータを取得
+if type(PI.width) == "number" then width = PI.width end
+if type(PI.justify) == "boolean" then justify = PI.justify end
+if type(PI.align) == "number" then align = PI.align end
+if type(PI.letter_spacing) == "number" then letter_spacing = PI.letter_spacing end
+if type(PI.line_spacing) == "number" then line_spacing = PI.line_spacing end
+if type(PI.speed) == "number" then speed = PI.speed end
+if type(PI.size) == "number" then size = PI.size end
+if type(PI.font) == "string" then font = PI.font end
+if type(PI.color) == "number" then color = PI.color end
+if type(PI.secondary_color) == "number" then secondary_color = PI.secondary_color end
+if type(PI.decoration) == "number" then decoration = PI.decoration end
+if type(PI.bold) == "boolean" then bold = PI.bold end
+if type(PI.italic) == "boolean" then italic = PI.italic end
+if type(PI.text) == "string" then text = PI.text end
+if type(PI.debug) == "boolean" then debug = PI.debug end
 
 local ffi = require("ffi")
 local mod = obj.module("budoux")

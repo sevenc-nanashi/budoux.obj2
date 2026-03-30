@@ -17,7 +17,23 @@ PIによって設定された値はトラックバーによる指定より優先
 
 ### キー一覧
 
-TODO
+| キー              | 型      | 説明               |
+| ----------------- | ------- | ------------------ |
+| `width`           | number  | 横幅               |
+| `justify`         | boolean | 両端揃え           |
+| `align`           | number  | 揃え（0〜11）      |
+| `letter_spacing`  | number  | 字間               |
+| `line_spacing`    | number  | 行間               |
+| `speed`           | number  | 表示速度           |
+| `size`            | number  | フォントサイズ     |
+| `font`            | string  | フォント名         |
+| `color`           | number  | 文字色             |
+| `secondary_color` | number  | 影・縁色           |
+| `decoration`      | number  | 装飾タイプ（0〜6） |
+| `bold`            | boolean | 太字               |
+| `italic`          | boolean | 斜体               |
+| `text`            | string  | テキスト           |
+| `debug`           | boolean | デバッグモード     |
 
 ## ライセンス
 
