@@ -6,7 +6,16 @@
 
 [![AviUtl2 Catalog](https://aviutl2-catalog-badge.sevenc7c.workers.dev/badge/v/sevenc-nanashi.budoux-obj2)](https://aviutl2-catalog-badge.sevenc7c.workers.dev/package/sevenc-nanashi.budoux-obj2)
 
-横幅を指定してテキストを折り返すAviUtl2用スクリプト。
+BudouXという機械学習モデルに基づき、文章を自動的に改行するAviUtl2のスクリプト。
+
+## Tips
+
+- 文章がどのように区切られるかは[BudouXの公式デモ](https://google.github.io/budoux/)を使うと便利です。
+  「Replace ZWSP with BR」をオンにすると、どこで改行される可能性があるかがわかります。
+- 行末のスペースは削除されます。\
+  例：`AviUtl 2.0`と書かれていて、`AviUtl`で行が埋まった場合、`AviUtl<改行>2.0`と改行されます。
+- `\b`と書くと文節の区切りとして認識されます。\
+  例：`AviUtl\b2.0`の場合、`AviUtl` と `2.0` の間で単語が区切られたとして認識されます。ただし、`AviUtl`で行を使い果たさなかった場合は、`AviUtl2.0`と表示されます。
 
 ## インストール
 

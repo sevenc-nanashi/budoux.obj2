@@ -4,6 +4,7 @@ use crate::evaluate_chars::CharState;
 pub enum WrappedBy {
     Whitespace(Vec<CharState>),
     Budoux,
+    Manual,
     Overflow,
     None,
 }
@@ -12,6 +13,40 @@ pub enum WrappedBy {
 pub struct Segment {
     pub chars: Vec<CharState>,
     pub wrapped_by: WrappedBy,
+}
+
+pub fn segment_manually(char_states: &[CharState]) -> Vec<Segment> {
+    let mut result = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    while i < char_states.len() {
+        if char_states[i].char == '\\'
+            && i + 1 < char_states.len()
+            && char_states[i + 1].char == 'b'
+        {
+            result.push(Segment {
+                chars: char_states[start..i].to_vec(),
+                wrapped_by: if start == 0 {
+                    WrappedBy::None
+                } else {
+                    WrappedBy::Manual
+                },
+            });
+            start = i + 2;
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    result.push(Segment {
+        chars: char_states[start..].to_vec(),
+        wrapped_by: if start == 0 {
+            WrappedBy::None
+        } else {
+            WrappedBy::Manual
+        },
+    });
+    result
 }
 
 pub fn segment_with_budoux(char_states: &[CharState]) -> Vec<Segment> {
@@ -87,6 +122,13 @@ pub fn segment(char_states: &[CharState]) -> Vec<Segment> {
     segment_with_whitespace(char_states)
         .into_iter()
         .flat_map(|segment| {
+            let mut segments = segment_manually(&segment.chars);
+            if let Some(first) = segments.first_mut() {
+                first.wrapped_by = segment.wrapped_by;
+            }
+            segments
+        })
+        .flat_map(|segment| {
             let mut segments = segment_with_budoux(&segment.chars);
             if let Some(first) = segments.first_mut() {
                 first.wrapped_by = segment.wrapped_by;
@@ -158,6 +200,22 @@ mod tests {
         assert_eq!(segments.len(), 2);
         assert!(matches!(segments[0].wrapped_by, WrappedBy::None));
         assert!(matches!(segments[1].wrapped_by, WrappedBy::Whitespace(_)));
+    }
+
+    #[test]
+    fn test_segment_manually() {
+        let char_states = "私は\\b学生です。"
+            .chars()
+            .map(make_char_state)
+            .collect::<Vec<_>>();
+        let segments = segment_manually(&char_states);
+        let texts = segments
+            .iter()
+            .map(|s| s.chars.iter().map(|c| c.char).collect::<String>())
+            .collect::<Vec<_>>();
+        assert_eq!(texts, vec!["私は", "学生です。"]);
+        assert!(matches!(segments[0].wrapped_by, WrappedBy::None));
+        assert!(matches!(segments[1].wrapped_by, WrappedBy::Manual));
     }
 
     #[test]
