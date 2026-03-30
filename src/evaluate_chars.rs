@@ -121,6 +121,9 @@ pub fn evaluate_chars(
                     current_state.italic = decoration.italic;
                     current_state.strikethrough = decoration.strikethrough;
                 }
+                if let Some(outline_size) = outline_size {
+                    current_state.outline_size = outline_size;
+                }
             }
             aviutl2_text_parser::Element::Font { name } => current_state.font = name,
             aviutl2_text_parser::Element::Speed { speed } => match speed {

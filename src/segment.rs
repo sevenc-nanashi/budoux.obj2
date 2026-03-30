@@ -14,21 +14,6 @@ pub struct Segment {
     pub wrapped_by: WrappedBy,
 }
 
-impl Segment {
-    pub fn concatenate(segments: &[Segment]) -> Vec<CharState> {
-        let mut result = Vec::new();
-        for (i, segment) in segments.iter().enumerate() {
-            if i > 0
-                && let WrappedBy::Whitespace(whitespace) = &segment.wrapped_by
-            {
-                result.extend_from_slice(whitespace);
-            }
-            result.extend_from_slice(&segment.chars);
-        }
-        result
-    }
-}
-
 pub fn segment_with_budoux(char_states: &[CharState]) -> Vec<Segment> {
     let text: String = char_states.iter().map(|c| c.char).collect();
     let text_segments = crate::budoux::segment(&text);

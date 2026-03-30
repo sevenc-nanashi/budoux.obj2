@@ -54,17 +54,29 @@ pub struct LayoutParams {
     pub italic: bool,
 }
 
+#[derive(Debug)]
+struct WrappedLine {
+    chars: Vec<crate::evaluate_chars::CharState>,
+    is_paragraph_end: bool,
+}
+
+/// Returns wrapped lines paired with a flag indicating whether the line is the last
+/// in its explicit paragraph (i.e., followed by `\n` or end-of-input). Justify should
+/// not be applied to paragraph-ending lines.
 fn build_wrapped_lines(
     lines: &[Vec<crate::evaluate_chars::CharState>],
     lua_handle: &LuaHandle,
     decoration: FullTextDecoration,
     char_spacing: f64,
     width: usize,
-) -> aviutl2::AnyResult<Vec<Vec<crate::evaluate_chars::CharState>>> {
-    let mut wrapped_lines: Vec<Vec<crate::evaluate_chars::CharState>> = Vec::new();
+) -> aviutl2::AnyResult<Vec<WrappedLine>> {
+    let mut wrapped_lines: Vec<WrappedLine> = Vec::new();
     for line_chars in lines {
         if line_chars.is_empty() {
-            wrapped_lines.push(vec![]);
+            wrapped_lines.push(WrappedLine {
+                chars: vec![],
+                is_paragraph_end: true,
+            });
             continue;
         }
         let mut segmented = segment::segment(line_chars)
@@ -95,7 +107,10 @@ fn build_wrapped_lines(
                     if current_line.is_empty() {
                         if segment.chars.len() == 1 {
                             // 1文字も入らない場合はその文字だけで改行する
-                            wrapped_lines.push(segment.chars.clone());
+                            wrapped_lines.push(WrappedLine {
+                                chars: segment.chars.clone(),
+                                is_paragraph_end: false,
+                            });
                             break 'try_push;
                         } else {
                             // 1文字も入らない場合は1文字ごとに分割する
@@ -112,7 +127,10 @@ fn build_wrapped_lines(
 
                     let mut new_line = vec![];
                     std::mem::swap(&mut current_line, &mut new_line);
-                    wrapped_lines.push(new_line);
+                    wrapped_lines.push(WrappedLine {
+                        chars: new_line,
+                        is_paragraph_end: false,
+                    });
                 } else {
                     if let segment::WrappedBy::Whitespace(ref chars) = segment.wrapped_by
                         && !current_line.is_empty()
@@ -125,7 +143,10 @@ fn build_wrapped_lines(
             }
         }
         if !current_line.is_empty() {
-            wrapped_lines.push(current_line);
+            wrapped_lines.push(WrappedLine {
+                chars: current_line,
+                is_paragraph_end: true,
+            });
         }
     }
     Ok(wrapped_lines)
@@ -133,7 +154,7 @@ fn build_wrapped_lines(
 
 #[expect(clippy::too_many_arguments)]
 fn layout_wrapped_lines(
-    wrapped_lines: &[Vec<crate::evaluate_chars::CharState>],
+    wrapped_lines: &[WrappedLine],
     lua_handle: &LuaHandle,
     current_style: &crate::evaluate_chars::CharState,
     width: usize,
@@ -146,7 +167,11 @@ fn layout_wrapped_lines(
     let mut line_y = 0.0_f64;
     let mut layouts: Vec<Layout> = Vec::new();
     let mut current_style = current_style.clone();
-    for (i, line_chars) in wrapped_lines.iter().enumerate() {
+    for WrappedLine {
+        chars: line_chars,
+        is_paragraph_end,
+    } in wrapped_lines.iter()
+    {
         let current_line_text = format!(
             "{}{}",
             current_style.to_style_control(),
@@ -155,13 +180,18 @@ fn layout_wrapped_lines(
         current_style = line_chars
             .last()
             .map_or(current_style.clone(), |c| c.clone());
-        let horizontal_align = if justify && i != wrapped_lines.len() - 1 {
+        let horizontal_align = if justify && !is_paragraph_end {
             HorizontalAlign::Justify
         } else {
             *align
         };
         let (line_width, line_height) =
             lua_handle.text_layout(&current_line_text, decoration, char_spacing)?;
+        if line_chars.is_empty() {
+            // 空行の場合は高さだけを確保して次の行へ
+            line_y += line_height as f64 + line_spacing;
+            continue;
+        }
         let y = line_y + line_height as f64 / 2.0;
         match horizontal_align {
             HorizontalAlign::Justify if line_chars.len() == 1 => {
@@ -172,26 +202,22 @@ fn layout_wrapped_lines(
                 });
             }
             HorizontalAlign::Justify => {
-                let char_widths = line_chars
-                    .iter()
-                    .map(|c| {
-                        let text = char_states_to_text(std::iter::once(c));
-                        let (w, _) = lua_handle.text_layout(&text, decoration, char_spacing)?;
-                        Ok(w as f64)
-                    })
-                    .collect::<aviutl2::AnyResult<Vec<f64>>>()?;
-                let total_char_width: f64 = char_widths.iter().sum();
-                let extra_space = width as f64 - total_char_width;
-                let space_between_chars = extra_space / (line_chars.len() - 1) as f64;
-                let mut x = 0.0;
-                for (c, char_width) in line_chars.iter().zip(char_widths.iter()) {
-                    let text = char_states_to_text(std::iter::once(c));
-                    layouts.push(Layout {
-                        content: text,
-                        position: (x + char_width / 2.0, y),
-                    });
-                    x += char_width + space_between_chars;
+                let space_between_chars =
+                    (width as f64 - line_width as f64) / (line_chars.len() - 1) as f64;
+                let mut draw_text = String::new();
+                let mut prev_style: Option<crate::evaluate_chars::CharState> = None;
+                for c in line_chars.iter() {
+                    if prev_style.is_none_or(|prev| !prev.same_style(c)) {
+                        draw_text.push_str(&c.to_style_control());
+                    }
+                    draw_text.push(c.char);
+                    draw_text.push_str(&format!("<p+{:.2},+0>", space_between_chars));
+                    prev_style = Some(c.clone());
                 }
+                layouts.push(Layout {
+                    content: draw_text,
+                    position: (width as f64 / 2.0, y),
+                });
             }
             HorizontalAlign::Left => {
                 layouts.push(Layout {
@@ -298,6 +324,7 @@ pub fn layout(
         line_spacing,
         char_spacing,
     )?;
+    tracing::trace!("layouts: {layouts:#?}, height: {height}");
 
     Ok((
         serde_json::to_string(&layouts).context("Failed to serialize layouts")?,

@@ -1,6 +1,5 @@
 use aviutl2::{anyhow::Context, module::ScriptModuleFunctions, tracing};
 
-mod bisect;
 mod budoux;
 mod evaluate_chars;
 mod layout;
@@ -13,7 +12,11 @@ struct BudouxMod2 {}
 impl aviutl2::module::ScriptModule for BudouxMod2 {
     fn new(_info: aviutl2::AviUtl2Info) -> aviutl2::AnyResult<Self> {
         aviutl2::tracing_subscriber::fmt()
-            .with_max_level(aviutl2::tracing::Level::DEBUG)
+            .with_max_level(if cfg!(debug_assertions) {
+                tracing::metadata::LevelFilter::TRACE
+            } else {
+                tracing::metadata::LevelFilter::DEBUG
+            })
             .event_format(aviutl2::logger::AviUtl2Formatter)
             .with_writer(aviutl2::logger::AviUtl2LogWriter)
             .init();

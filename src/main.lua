@@ -177,3 +177,8 @@ for _, item in ipairs(layout) do
 end
 obj.setoption("drawtarget", "framebuffer")
 obj.load("tempbuffer")
+if vertical_align == 0 then
+    obj.cy = -height / 2
+elseif vertical_align == 2 then
+    obj.cy = height / 2
+end

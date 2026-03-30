@@ -75,8 +75,7 @@ impl<'a> aviutl2::module::FromScriptModuleParamTable<'a> for FullTextDecoration 
     }
 }
 
-type LayoutCacheKey = (String, FullTextDecoration, u64);
-static LAYOUT_CACHE: std::sync::LazyLock<dashmap::DashMap<LayoutCacheKey, (usize, usize)>> =
+static LAYOUT_CACHE: std::sync::LazyLock<dashmap::DashMap<u64, (usize, usize)>> =
     std::sync::LazyLock::new(dashmap::DashMap::new);
 
 impl LuaHandle {
@@ -91,11 +90,18 @@ impl LuaHandle {
         decoration: FullTextDecoration,
         letter_spacing: f64,
     ) -> anyhow::Result<(usize, usize)> {
-        let cache_key = (
-            styled_text.to_string(),
-            decoration,
-            letter_spacing.to_bits(),
-        );
+        let cache_key = {
+            // NOTE: さすがに衝突はしないでしょう...
+            use xxhash_rust::xxh3::Xxh3;
+            let mut hasher = Xxh3::new();
+            // せっかくUUIDをもらったので有効活用してあげる
+            // https://twitter.com/mimifuwacc/status/2037864289374249321
+            hasher.update(b"05d5d995-b7dd-48b3-ab4b-5e210fb1f602");
+            hasher.update(styled_text.as_bytes());
+            hasher.update(&[decoration as u8]);
+            hasher.update(&letter_spacing.to_bits().to_le_bytes());
+            hasher.digest()
+        };
         if let Some(cached) = LAYOUT_CACHE.get(&cache_key) {
             return Ok(*cached);
         }
