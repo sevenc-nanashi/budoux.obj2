@@ -19,6 +19,8 @@ impl CharState {
             && (self.size - other.size).abs() < f64::EPSILON
             && self.color == other.color
             && self.font == other.font
+            && self.secondary_color == other.secondary_color
+            && (self.outline_size - other.outline_size).abs() < f64::EPSILON
     }
     pub fn to_style_control(&self) -> String {
         let mut decoration = String::new();
@@ -35,7 +37,8 @@ impl CharState {
         let font = &self.font;
         let color = &self.color;
         let secondary_color = &self.secondary_color;
-        format!("<s{size},{font},{decoration}><#{color},{secondary_color}>")
+        let outline_size = &self.outline_size;
+        format!("<s{size},{font},{decoration},{outline_size}><#{color},{secondary_color}>")
     }
 }
 
