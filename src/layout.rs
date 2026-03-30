@@ -285,7 +285,7 @@ fn layout_wrapped_lines(
                 layouts.push(Layout {
                     content: visible_current_line_text,
                     position: (
-                        width as f64 - line_width as f64 - visible_line_width as f64 / 2.0,
+                        width as f64 - line_width as f64 + visible_line_width as f64 / 2.0,
                         y,
                     ),
                 });
