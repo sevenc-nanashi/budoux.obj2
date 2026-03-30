@@ -188,6 +188,7 @@ if not layout_success then
 end
 local layout = json.decode(layout_json_or_err)
 
+local horizontal_align = align % 4
 local vertical_align = math.floor(align / 4)
 obj.setoption("drawtarget", "tempbuffer", layout_width, layout_height)
 obj.setfont("", 0, decoration, 0, 0, false, false, letter_spacing)
@@ -201,4 +202,9 @@ if vertical_align == 0 then
     obj.cy = -layout_height / 2
 elseif vertical_align == 2 then
     obj.cy = layout_height / 2
+end
+if horizontal_align == 0 then
+    obj.cx = -layout_width / 2
+elseif horizontal_align == 2 then
+    obj.cx = layout_width / 2
 end
