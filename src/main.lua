@@ -6,7 +6,7 @@
 
 ---$track:横幅
 ---min=1
----max=1000
+---max=4000
 ---step=1
 local width = 400
 

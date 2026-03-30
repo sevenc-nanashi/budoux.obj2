@@ -217,7 +217,7 @@ fn layout_wrapped_lines(
                     if prev_style.is_none_or(|prev| !prev.same_style(c)) {
                         draw_text.push_str(&c.to_style_control());
                     }
-                    if ((c.start_time)..=(c.end_time.unwrap_or(f64::INFINITY))).contains(&time) {
+                    if c.start_time <= time {
                         draw_text.push(c.char);
                     } else {
                         let (base_char_width, _) = lua_handle.text_layout(
@@ -312,7 +312,6 @@ pub fn layout(
             outline_size,
             font: font.clone(),
             start_time: 0.0,
-            end_time: None,
         },
         show_speed,
     )
@@ -343,7 +342,6 @@ pub fn layout(
         outline_size,
         font: font.clone(),
         start_time: 0.0,
-        end_time: None,
     };
 
     let (layouts, height) = layout_wrapped_lines(

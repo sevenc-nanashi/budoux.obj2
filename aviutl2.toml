@@ -11,6 +11,7 @@ aviutl2_version = "latest"
 
 [preview]
 aviutl2_version = "latest"
+catalog_dependencies = ["sevenc-nanashi.aviutl2-rs.rusty_ffmpeg"]
 
 [artifacts.English-budoux-obj2]
 destination = "Language/English.budoux-obj2.aul2"

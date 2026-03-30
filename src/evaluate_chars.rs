@@ -10,7 +10,6 @@ pub struct CharState {
     pub outline_size: f64,
     pub font: String,
     pub start_time: f64,
-    pub end_time: Option<f64>,
 }
 impl CharState {
     pub fn same_style(&self, other: &CharState) -> bool {
@@ -49,9 +48,6 @@ pub fn char_states_to_text<'a, I: IntoIterator<Item = &'a CharState>>(
     for char_state in char_states {
         if char_state.start_time > time {
             break;
-        }
-        if char_state.end_time.is_some_and(|end| end <= time) {
-            continue;
         }
         if let Some(current) = current_style {
             if !current.same_style(char_state) {
@@ -195,7 +191,6 @@ mod tests {
             outline_size: 0.0,
             font: "Arial".to_string(),
             start_time: 0.0,
-            end_time: None,
         };
         let text = "Hello<#red>W<r2.0>orld<s1>!";
         let chars = evaluate_chars(text, &base_state, 0.0).unwrap();
@@ -222,7 +217,6 @@ mod tests {
             outline_size: 0.0,
             font: "Arial".to_string(),
             start_time: 0.0,
-            end_time: None,
         };
         let text = "Line1\nLine2\tTabbed";
         let chars = evaluate_chars(text, &base_state, 1.0).unwrap();

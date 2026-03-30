@@ -110,7 +110,6 @@ mod tests {
             color: "FFFFFF".to_string(),
             font: "Arial".to_string(),
             start_time: 0.0,
-            end_time: None,
             secondary_color: "000000".to_string(),
             outline_size: 0.0,
         }
