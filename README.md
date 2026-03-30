@@ -20,7 +20,7 @@ PIによって設定された値はトラックバーによる指定より優先
 | キー              | 型      | 説明               |
 | ----------------- | ------- | ------------------ |
 | `width`           | number  | 横幅               |
-| `justify`         | boolean | 両端揃え           |
+| `justify`         | number  | 両端揃え（0〜2）   |
 | `align`           | number  | 揃え（0〜11）      |
 | `letter_spacing`  | number  | 字間               |
 | `line_spacing`    | number  | 行間               |

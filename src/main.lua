@@ -10,8 +10,11 @@
 ---step=1
 local width = 400
 
----$check:両端揃え
-local justify = false
+---$select:両端揃え
+---なし=0
+---指定幅=1
+---最長行=2
+local justify = 0
 
 ---$select:揃え
 ---左揃え[上]=0
@@ -96,7 +99,7 @@ local PI = {}
 
 -- PIからパラメータを取得
 if type(PI.width) == "number" then width = PI.width end
-if type(PI.justify) == "boolean" then justify = PI.justify end
+if type(PI.justify) == "number" then justify = PI.justify end
 if type(PI.align) == "number" then align = PI.align end
 if type(PI.letter_spacing) == "number" then letter_spacing = PI.letter_spacing end
 if type(PI.line_spacing) == "number" then line_spacing = PI.line_spacing end
@@ -155,7 +158,7 @@ end
 
 local callback = ffi.cast("void (*)(const char*)", lua_callback_wrapper)
 local callback_address = tostring(ffi.cast("intptr_t", callback))
-local layout_success, layout_json_or_err, height = pcall(function()
+local layout_success, layout_json_or_err, layout_width, layout_height = pcall(function()
     return mod.layout(
         {
             lua_callback = callback_address,
@@ -186,16 +189,16 @@ end
 local layout = json.decode(layout_json_or_err)
 
 local vertical_align = math.floor(align / 4)
-obj.setoption("drawtarget", "tempbuffer", width, height)
+obj.setoption("drawtarget", "tempbuffer", layout_width, layout_height)
 obj.setfont("", 0, decoration, 0, 0, false, false, letter_spacing)
 for _, item in ipairs(layout) do
     obj.load("text", item.content)
-    obj.draw(item.position[1] - width / 2, item.position[2] - height / 2)
+    obj.draw(item.position[1] - layout_width / 2, item.position[2] - layout_height / 2)
 end
 obj.setoption("drawtarget", "framebuffer")
 obj.load("tempbuffer")
 if vertical_align == 0 then
-    obj.cy = -height / 2
+    obj.cy = -layout_height / 2
 elseif vertical_align == 2 then
-    obj.cy = height / 2
+    obj.cy = layout_height / 2
 end

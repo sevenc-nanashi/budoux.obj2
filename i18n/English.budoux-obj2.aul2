@@ -2,6 +2,9 @@
 レイアウト=Layout
 横幅=Width
 両端揃え=Justify
+なし=None
+指定幅=Specified Width
+最長行=Longest Line
 揃え=Alignment
 左揃え[上]=Left Align [Top]
 中央揃え[上]=Center Align [Top]

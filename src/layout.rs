@@ -11,6 +11,27 @@ pub struct Layout {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Justify {
+    No,
+    SpecifiedWidth,
+    LongestLine,
+}
+impl<'a> aviutl2::module::FromScriptModuleParamTable<'a> for Justify {
+    fn from_param_table(
+        param: &'a aviutl2::module::ScriptModuleParamTable,
+        key: &str,
+    ) -> Option<Self> {
+        let value = param.get_int(key);
+        match value {
+            0 => Some(Self::No),
+            1 => Some(Self::SpecifiedWidth),
+            2 => Some(Self::LongestLine),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HorizontalAlign {
     Left,
     Center,
@@ -39,7 +60,7 @@ pub struct LayoutParams {
     pub lua_callback: String,
     pub width: usize,
     pub align: HorizontalAlign,
-    pub justify: bool,
+    pub justify: Justify,
     pub text: String,
     pub size: f64,
     pub line_spacing: f64,
@@ -161,7 +182,7 @@ fn layout_wrapped_lines(
     current_style: &crate::evaluate_chars::CharState,
     width: usize,
     align: &HorizontalAlign,
-    justify: bool,
+    justify: Justify,
     decoration: FullTextDecoration,
     line_spacing: f64,
     char_spacing: f64,
@@ -185,7 +206,7 @@ fn layout_wrapped_lines(
         current_style = line_chars
             .last()
             .map_or(current_style.clone(), |c| c.clone());
-        let horizontal_align = if justify && !is_paragraph_end {
+        let horizontal_align = if justify != Justify::No && !is_paragraph_end {
             HorizontalAlign::Justify
         } else {
             *align
@@ -297,7 +318,7 @@ pub fn layout(
         italic,
         time,
     }: LayoutParams,
-) -> aviutl2::AnyResult<(String, f64)> {
+) -> aviutl2::AnyResult<(String, f64, f64)> {
     let lua_handle = LuaHandle::new(lua_callback).context("Failed to create LuaHandle")?;
     let chars = evaluate_chars(
         &text,
@@ -331,6 +352,26 @@ pub fn layout(
         .context("Failed to build wrapped lines")?;
     tracing::trace!("wrapped_lines: {wrapped_lines:#?}");
 
+    let width = match justify {
+        Justify::No => width,
+        Justify::SpecifiedWidth => width,
+        Justify::LongestLine => {
+            let mut max_line_width = 0;
+            for WrappedLine {
+                chars: line_chars, ..
+            } in wrapped_lines.iter()
+            {
+                let line_text = char_states_to_text(line_chars, f64::INFINITY);
+                let (line_width, _) =
+                    lua_handle.text_layout(&line_text, decoration, char_spacing)?;
+                if line_width > max_line_width {
+                    max_line_width = line_width;
+                }
+            }
+            max_line_width
+        }
+    };
+
     let current_style: crate::evaluate_chars::CharState = crate::evaluate_chars::CharState {
         char: ' ',
         bold,
@@ -360,6 +401,7 @@ pub fn layout(
 
     Ok((
         serde_json::to_string(&layouts).context("Failed to serialize layouts")?,
+        width as f64,
         height,
     ))
 }
