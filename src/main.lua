@@ -35,7 +35,7 @@ local align = 0
 ---min=-500
 ---max=500
 ---step=0.01
-local letter_spacing = 0
+local char_spacing = 0
 
 ---$track:行間
 ---min=-500
@@ -101,7 +101,7 @@ local PI = {}
 if type(PI.width) == "number" then width = PI.width end
 if type(PI.justify) == "number" then justify = PI.justify end
 if type(PI.align) == "number" then align = PI.align end
-if type(PI.letter_spacing) == "number" then letter_spacing = PI.letter_spacing end
+if type(PI.char_spacing) == "number" then char_spacing = PI.char_spacing end
 if type(PI.line_spacing) == "number" then line_spacing = PI.line_spacing end
 if type(PI.speed) == "number" then speed = PI.speed end
 if type(PI.size) == "number" then size = PI.size end
@@ -128,7 +128,7 @@ local function lua_callback(str)
         print("@verbose", "Received callback:", request)
     end
     if request.type == "text_layout" then
-        obj.setfont("", 0, request.data.decoration, 0, 0, false, false, request.data.letter_spacing)
+        obj.setfont("", 0, request.data.decoration, 0, 0, false, false, request.data.char_spacing)
         local text_width, text_height = obj.load("textlayout", request.data.text)
         mod.push_stack(json.encode({ width = text_width, height = text_height }))
     else
@@ -167,7 +167,7 @@ local layout_success, layout_json_or_err, layout_width, layout_height = pcall(fu
             justify = justify,
             text = text,
             size = size,
-            letter_spacing = letter_spacing,
+            char_spacing = char_spacing,
             line_spacing = line_spacing,
             show_speed = speed,
             font = font,
@@ -191,7 +191,7 @@ local layout = json.decode(layout_json_or_err)
 local horizontal_align = align % 4
 local vertical_align = math.floor(align / 4)
 obj.setoption("drawtarget", "tempbuffer", layout_width, layout_height)
-obj.setfont("", 0, decoration, 0, 0, false, false, letter_spacing)
+obj.setfont("", 0, decoration, 0, 0, false, false, char_spacing)
 for _, item in ipairs(layout) do
     obj.load("text", item.content)
     obj.draw(item.position[1] - layout_width / 2, item.position[2] - layout_height / 2)

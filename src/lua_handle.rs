@@ -34,7 +34,7 @@ enum LuaRequest {
     TextLayout {
         text: String,
         decoration: FullTextDecoration,
-        letter_spacing: f64,
+        char_spacing: f64,
     },
 }
 
@@ -88,7 +88,7 @@ impl LuaHandle {
         &self,
         styled_text: &str,
         decoration: FullTextDecoration,
-        letter_spacing: f64,
+        char_spacing: f64,
     ) -> anyhow::Result<(usize, usize)> {
         let cache_key = {
             // NOTE: さすがに衝突はしないでしょう...
@@ -99,7 +99,7 @@ impl LuaHandle {
             hasher.update(b"05d5d995-b7dd-48b3-ab4b-5e210fb1f602");
             hasher.update(styled_text.as_bytes());
             hasher.update(&[decoration as u8]);
-            hasher.update(&letter_spacing.to_bits().to_le_bytes());
+            hasher.update(&char_spacing.to_bits().to_le_bytes());
             hasher.digest()
         };
         if let Some(cached) = LAYOUT_CACHE.get(&cache_key) {
@@ -108,7 +108,7 @@ impl LuaHandle {
         let request = LuaRequest::TextLayout {
             text: styled_text.to_string(),
             decoration,
-            letter_spacing,
+            char_spacing,
         };
         let json = serde_json::to_string(&request)?;
         let c_string = std::ffi::CString::new(json)?;

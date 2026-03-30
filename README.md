@@ -26,7 +26,7 @@ PIによって設定された値はトラックバーによる指定より優先
 | `width`           | number  | 横幅               |
 | `justify`         | number  | 両端揃え（0〜2）   |
 | `align`           | number  | 揃え（0〜11）      |
-| `letter_spacing`  | number  | 字間               |
+| `char_spacing`    | number  | 字間               |
 | `line_spacing`    | number  | 行間               |
 | `speed`           | number  | 表示速度           |
 | `size`            | number  | フォントサイズ     |
