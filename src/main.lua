@@ -114,7 +114,7 @@ if type(PI.italic) == "boolean" then italic = PI.italic end
 if type(PI.text) == "string" then text = PI.text end
 if type(PI.debug) == "boolean" then debug = PI.debug end
 
-obj.setanchor("width,size", 1)
+-- obj.setanchor("width,size", 1)
 
 local ffi = require("ffi")
 local buffer = require("string.buffer")
@@ -136,6 +136,10 @@ local function lua_callback(str_ptr, str_len)
 
     local inner_obj = {
       mes = function(msg)
+        if type(msg) ~= "string" and type(msg) ~= "number" then
+          mod.push_stack_error("mes function expects a string or number argument")
+          return
+        end
         messages = messages .. tostring(msg)
       end,
     }

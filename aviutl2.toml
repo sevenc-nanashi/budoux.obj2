@@ -8,6 +8,7 @@ version = "0.1.0"
 
 [development]
 aviutl2_version = "latest"
+catalog_dependencies = ["oov.PSDToolKit2", "oov.GCMZDrops2"]
 
 [preview]
 aviutl2_version = "latest"

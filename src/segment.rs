@@ -20,9 +20,9 @@ pub fn segment_manually(char_states: &[CharState]) -> Vec<Segment> {
     let mut start = 0;
     let mut i = 0;
     while i < char_states.len() {
-        if char_states[i].char == '\\'
+        if char_states[i].unit.as_char() == Some('\\')
             && i + 1 < char_states.len()
-            && char_states[i + 1].char == 'b'
+            && char_states[i + 1].unit.as_char() == Some('b')
         {
             result.push(Segment {
                 chars: char_states[start..i].to_vec(),
@@ -50,22 +50,40 @@ pub fn segment_manually(char_states: &[CharState]) -> Vec<Segment> {
 }
 
 pub fn segment_with_budoux(char_states: &[CharState]) -> Vec<Segment> {
-    let text: String = char_states.iter().map(|c| c.char).collect();
+    let mut owners = Vec::new();
+    let text: String = char_states
+        .iter()
+        .enumerate()
+        .map(|(index, state)| {
+            let text = state.unit.segmentation_text();
+            owners.extend(std::iter::repeat_n(index, text.chars().count()));
+            text
+        })
+        .collect();
     let text_segments = crate::budoux::segment(&text);
     let mut result = Vec::new();
-    let mut index = 0;
+    let mut char_index = 0;
+    let mut unit_index = 0;
 
     for text_segment in text_segments {
-        let len = text_segment.chars().count();
+        char_index += text_segment.chars().count();
+        if char_index < owners.len() && owners[char_index - 1] == owners[char_index] {
+            continue;
+        }
+        let end_unit = if char_index == owners.len() {
+            char_states.len()
+        } else {
+            owners[char_index]
+        };
         result.push(Segment {
-            chars: char_states[index..index + len].to_vec(),
-            wrapped_by: if index == 0 {
+            chars: char_states[unit_index..end_unit].to_vec(),
+            wrapped_by: if unit_index == 0 {
                 WrappedBy::None
             } else {
                 WrappedBy::Budoux
             },
         });
-        index += len;
+        unit_index = end_unit;
     }
 
     result
@@ -77,7 +95,7 @@ pub fn segment_with_whitespace(char_states: &[CharState]) -> Vec<Segment> {
     let mut pending_whitespace: Vec<CharState> = Vec::new();
 
     for (i, char_state) in char_states.iter().enumerate() {
-        if char_state.char.is_whitespace() {
+        if char_state.unit.is_whitespace() {
             if let Some(start) = run_start.take() {
                 let wrapped_by = if pending_whitespace.is_empty() {
                     WrappedBy::None
@@ -144,17 +162,27 @@ mod tests {
 
     fn make_char_state(c: char) -> CharState {
         CharState {
-            char: c,
-            bold: false,
-            italic: false,
-            strikethrough: false,
-            size: 12.0,
-            color: "FFFFFF".to_string(),
-            font: "Arial".to_string(),
+            unit: crate::evaluate_chars::TextUnit::Char(c),
+            control_index: 0,
             start_time: 0.0,
-            secondary_color: "000000".to_string(),
-            outline_size: 0.0,
         }
+    }
+
+    fn make_ruby_state(base: &str, ruby: &str) -> CharState {
+        CharState {
+            unit: crate::evaluate_chars::TextUnit::Ruby {
+                base: vec![aviutl2_text_parser::Element::Text(base.to_string())],
+                ruby: vec![aviutl2_text_parser::Element::Text(ruby.to_string())],
+                scale: None,
+                expand_line_height: false,
+            },
+            control_index: 0,
+            start_time: 0.0,
+        }
+    }
+
+    fn states_to_text(states: &[CharState]) -> String {
+        states.iter().map(|state| state.unit.to_string()).collect()
     }
 
     #[test]
@@ -166,9 +194,35 @@ mod tests {
         let segments = segment_with_budoux(&char_states);
         let texts = segments
             .iter()
-            .map(|s| s.chars.iter().map(|c| c.char).collect::<String>())
+            .map(|s| states_to_text(&s.chars))
             .collect::<Vec<_>>();
         assert_eq!(texts, vec!["私は", "学生です。"]);
+    }
+
+    #[test]
+    fn test_segment_with_budoux_keeps_ruby_atomic() {
+        let char_states = vec![
+            make_char_state('私'),
+            make_char_state('は'),
+            make_ruby_state("学生", "がくせい"),
+            make_char_state('で'),
+            make_char_state('す'),
+        ];
+        let segments = segment_with_budoux(&char_states);
+        let flattened = segments
+            .iter()
+            .flat_map(|segment| segment.chars.iter())
+            .collect::<Vec<_>>();
+        assert_eq!(flattened, char_states.iter().collect::<Vec<_>>());
+        assert_eq!(
+            flattened
+                .iter()
+                .filter(|state| {
+                    matches!(state.unit, crate::evaluate_chars::TextUnit::Ruby { .. })
+                })
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -180,7 +234,7 @@ mod tests {
         let segments = segment_with_whitespace(&char_states);
         let texts = segments
             .iter()
-            .map(|s| s.chars.iter().map(|c| c.char).collect::<String>())
+            .map(|s| states_to_text(&s.chars))
             .collect::<Vec<_>>();
         assert_eq!(texts, vec!["hello", "world"]);
     }
@@ -194,7 +248,7 @@ mod tests {
         let segments = segment_with_whitespace(&char_states);
         let texts = segments
             .iter()
-            .map(|s| s.chars.iter().map(|c| c.char).collect::<String>())
+            .map(|s| states_to_text(&s.chars))
             .collect::<Vec<_>>();
         assert_eq!(texts, vec!["hello", "world"]);
         assert_eq!(segments.len(), 2);
@@ -211,7 +265,7 @@ mod tests {
         let segments = segment_manually(&char_states);
         let texts = segments
             .iter()
-            .map(|s| s.chars.iter().map(|c| c.char).collect::<String>())
+            .map(|s| states_to_text(&s.chars))
             .collect::<Vec<_>>();
         assert_eq!(texts, vec!["私は", "学生です。"]);
         assert!(matches!(segments[0].wrapped_by, WrappedBy::None));
@@ -227,7 +281,7 @@ mod tests {
         let segments = segment_with_whitespace(&char_states);
         let texts = segments
             .iter()
-            .map(|s| s.chars.iter().map(|c| c.char).collect::<String>())
+            .map(|s| states_to_text(&s.chars))
             .collect::<Vec<_>>();
         assert_eq!(texts, vec!["私は学生です。"]);
         assert!(matches!(segments[0].wrapped_by, WrappedBy::None));

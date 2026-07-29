@@ -1,6 +1,8 @@
 use aviutl2::{anyhow::Context, tracing};
 
-use crate::evaluate_chars::{char_states_to_text, evaluate_chars};
+use crate::evaluate_chars::{
+    char_states_to_text, controls_between_to_text, controls_to_text, evaluate_chars,
+};
 use crate::lua_handle::{FullTextDecoration, LuaHandle};
 use crate::segment;
 
@@ -91,24 +93,37 @@ pub struct LayoutParams {
 #[derive(Debug)]
 struct WrappedLine {
     chars: Vec<crate::evaluate_chars::CharState>,
+    control_index: usize,
     is_paragraph_end: bool,
+}
+
+#[derive(Debug)]
+struct SourceLine {
+    chars: Vec<crate::evaluate_chars::CharState>,
+    control_index: usize,
 }
 
 /// Returns wrapped lines paired with a flag indicating whether the line is the last
 /// in its explicit paragraph (i.e., followed by `\n` or end-of-input). Justify should
 /// not be applied to paragraph-ending lines.
 fn build_wrapped_lines(
-    lines: &[Vec<crate::evaluate_chars::CharState>],
+    lines: &[SourceLine],
+    controls: &[aviutl2_text_parser::Element],
     lua_handle: &LuaHandle,
     decoration: FullTextDecoration,
     char_spacing: f64,
     width: usize,
 ) -> aviutl2::AnyResult<Vec<WrappedLine>> {
     let mut wrapped_lines: Vec<WrappedLine> = Vec::new();
-    for line_chars in lines {
+    for SourceLine {
+        chars: line_chars,
+        control_index,
+    } in lines
+    {
         if line_chars.is_empty() {
             wrapped_lines.push(WrappedLine {
                 chars: vec![],
+                control_index: *control_index,
                 is_paragraph_end: true,
             });
             continue;
@@ -134,6 +149,7 @@ fn build_wrapped_lines(
                         .chain(segment.chars.iter())
                         .cloned()
                         .collect::<Vec<_>>(),
+                    controls,
                     f64::INFINITY,
                 );
                 let (segment_width, _) =
@@ -144,6 +160,7 @@ fn build_wrapped_lines(
                             // 1文字も入らない場合はその文字だけで改行する
                             wrapped_lines.push(WrappedLine {
                                 chars: segment.chars.clone(),
+                                control_index: segment.chars[0].control_index,
                                 is_paragraph_end: false,
                             });
                             break 'try_push;
@@ -163,6 +180,7 @@ fn build_wrapped_lines(
                     let mut new_line = vec![];
                     std::mem::swap(&mut current_line, &mut new_line);
                     wrapped_lines.push(WrappedLine {
+                        control_index: new_line[0].control_index,
                         chars: new_line,
                         is_paragraph_end: false,
                     });
@@ -179,6 +197,7 @@ fn build_wrapped_lines(
         }
         if !current_line.is_empty() {
             wrapped_lines.push(WrappedLine {
+                control_index: current_line[0].control_index,
                 chars: current_line,
                 is_paragraph_end: true,
             });
@@ -190,8 +209,8 @@ fn build_wrapped_lines(
 #[expect(clippy::too_many_arguments)]
 fn layout_wrapped_lines(
     wrapped_lines: &[WrappedLine],
+    controls: &[aviutl2_text_parser::Element],
     lua_handle: &LuaHandle,
-    current_style: &crate::evaluate_chars::CharState,
     width: usize,
     align: &HorizontalAlign,
     justify: Justify,
@@ -202,22 +221,18 @@ fn layout_wrapped_lines(
 ) -> aviutl2::AnyResult<(Vec<Layout>, f64)> {
     let mut line_y = 0.0_f64;
     let mut layouts: Vec<Layout> = Vec::new();
-    let mut current_style = current_style.clone();
     for WrappedLine {
         chars: line_chars,
+        control_index,
         is_paragraph_end,
     } in wrapped_lines.iter()
     {
-        let current_line_text = format!(
-            "{}{}",
-            current_style.to_style_control(),
-            crate::evaluate_chars::char_states_to_text(line_chars, f64::INFINITY)
-        );
-        let visible_current_line_text =
-            crate::evaluate_chars::char_states_to_text(line_chars, time);
-        current_style = line_chars
-            .last()
-            .map_or(current_style.clone(), |c| c.clone());
+        let current_line_text = if line_chars.is_empty() {
+            controls_to_text(controls, *control_index)
+        } else {
+            char_states_to_text(line_chars, controls, f64::INFINITY)
+        };
+        let visible_current_line_text = char_states_to_text(line_chars, controls, time);
         let horizontal_align = if justify != Justify::No && !is_paragraph_end {
             HorizontalAlign::Justify
         } else {
@@ -225,7 +240,10 @@ fn layout_wrapped_lines(
         };
         let (line_width, line_height) =
             lua_handle.text_layout(&current_line_text, decoration, char_spacing)?;
-        if visible_current_line_text.is_empty() {
+        if !line_chars
+            .iter()
+            .any(|char_state| char_state.start_time <= time)
+        {
             // 空行の場合は高さだけを確保して次の行へ
             line_y += line_height as f64 + line_spacing;
             continue;
@@ -244,22 +262,25 @@ fn layout_wrapped_lines(
             HorizontalAlign::Justify => {
                 let space_between_chars =
                     (width as f64 - line_width as f64) / (line_chars.len() - 1) as f64;
-                let mut draw_text = String::new();
-                let mut prev_style: Option<crate::evaluate_chars::CharState> = None;
+                let mut emitted_controls = line_chars[0].control_index;
+                let mut draw_text = controls_to_text(controls, emitted_controls);
                 for c in line_chars.iter() {
-                    if prev_style.is_none_or(|prev| !prev.same_style(c)) {
-                        draw_text.push_str(&c.to_style_control());
-                    }
+                    draw_text.push_str(&controls_between_to_text(
+                        controls,
+                        emitted_controls,
+                        c.control_index,
+                    ));
                     if c.start_time <= time {
-                        draw_text.push(c.char);
+                        draw_text.push_str(&c.unit.to_string());
                     } else {
+                        let control_prefix = controls_to_text(controls, c.control_index);
                         let (base_char_width, _) = lua_handle.text_layout(
-                            &format!("{} ", c.to_style_control()),
+                            &format!("{control_prefix} "),
                             decoration,
                             char_spacing,
                         )?;
                         let (char_width, _) = lua_handle.text_layout(
-                            &format!("{} {}", c.to_style_control(), c.char),
+                            &format!("{control_prefix} {}", c.unit),
                             decoration,
                             char_spacing,
                         )?;
@@ -269,7 +290,7 @@ fn layout_wrapped_lines(
                         ));
                     }
                     draw_text.push_str(&format!("<p+{:.2},+0>", space_between_chars));
-                    prev_style = Some(c.clone());
+                    emitted_controls = c.control_index;
                 }
                 let (draw_text_width, _) =
                     lua_handle.text_layout(&draw_text, decoration, char_spacing)?;
@@ -340,36 +361,60 @@ pub fn layout(
         }
     })
     .context("Failed to process inline scripts")?;
-    let chars = evaluate_chars(
-        &text,
-        &crate::evaluate_chars::CharState {
-            char: ' ',
-            bold,
-            italic,
-            strikethrough: false,
-            size,
-            color: format!("{:06X}", color),
-            secondary_color: format!("{:06X}", secondary_color),
-            outline_size,
-            font: font.clone(),
-            start_time: 0.0,
+    let rgb = |value: u32| {
+        aviutl2_text_parser::ColorValue::Rgb(
+            ((value >> 16) & 0xff) as u8,
+            ((value >> 8) & 0xff) as u8,
+            (value & 0xff) as u8,
+        )
+    };
+    let initial_controls = vec![
+        aviutl2_text_parser::Element::Size {
+            size: aviutl2_text_parser::ScalarValue::Absolute(size),
+            font: Some(font),
+            decoration: Some(aviutl2_text_parser::TextDecoration {
+                bold,
+                italic,
+                strikethrough: false,
+            }),
+            outline_size: Some(outline_size),
         },
-        show_speed,
-    )
-    .context("Failed to evaluate characters")?;
-    tracing::trace!("evaluate_chars {chars:?}");
-    let lines = chars.into_iter().fold(vec![vec![]], |mut acc, char_state| {
-        if char_state.char == '\n' {
-            acc.push(vec![]);
+        aviutl2_text_parser::Element::Color {
+            code: aviutl2_text_parser::ColorType::Pair(rgb(color), rgb(secondary_color)),
+        },
+    ];
+    let initial_control_index = initial_controls.len();
+    let evaluated = evaluate_chars(&text, initial_controls, show_speed);
+    tracing::trace!("evaluate_chars {evaluated:?}");
+    let mut lines = vec![SourceLine {
+        chars: vec![],
+        control_index: initial_control_index,
+    }];
+    for char_state in evaluated.chars {
+        if char_state.unit.as_char() == Some('\n') {
+            lines.push(SourceLine {
+                chars: vec![],
+                control_index: char_state.control_index,
+            });
         } else {
-            acc.last_mut().unwrap().push(char_state);
+            lines
+                .last_mut()
+                .expect("lines always contains at least one line")
+                .chars
+                .push(char_state);
         }
-        acc
-    });
+    }
     tracing::trace!("lines: {lines:#?}");
 
-    let wrapped_lines = build_wrapped_lines(&lines, &lua_handle, decoration, char_spacing, width)
-        .context("Failed to build wrapped lines")?;
+    let wrapped_lines = build_wrapped_lines(
+        &lines,
+        &evaluated.controls,
+        &lua_handle,
+        decoration,
+        char_spacing,
+        width,
+    )
+    .context("Failed to build wrapped lines")?;
     tracing::trace!("wrapped_lines: {wrapped_lines:#?}");
 
     let width = match justify {
@@ -381,7 +426,7 @@ pub fn layout(
                 chars: line_chars, ..
             } in wrapped_lines.iter()
             {
-                let line_text = char_states_to_text(line_chars, f64::INFINITY);
+                let line_text = char_states_to_text(line_chars, &evaluated.controls, f64::INFINITY);
                 let (line_width, _) =
                     lua_handle.text_layout(&line_text, decoration, char_spacing)?;
                 if line_width > max_line_width {
@@ -392,23 +437,10 @@ pub fn layout(
         }
     };
 
-    let current_style: crate::evaluate_chars::CharState = crate::evaluate_chars::CharState {
-        char: ' ',
-        bold,
-        italic,
-        strikethrough: false,
-        size,
-        color: format!("{color:06X}"),
-        secondary_color: format!("{secondary_color:06X}"),
-        outline_size,
-        font: font.clone(),
-        start_time: 0.0,
-    };
-
     let (layouts, height) = layout_wrapped_lines(
         &wrapped_lines,
+        &evaluated.controls,
         &lua_handle,
-        &current_style,
         width,
         &align,
         justify,

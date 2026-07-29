@@ -1,81 +1,147 @@
+use aviutl2_text_parser::Element;
+
 #[derive(Debug, Clone, PartialEq)]
-pub struct CharState {
-    pub char: char,
-    pub bold: bool,
-    pub italic: bool,
-    pub strikethrough: bool,
-    pub size: f64,
-    pub color: String,
-    pub secondary_color: String,
-    pub outline_size: f64,
-    pub font: String,
-    pub start_time: f64,
+pub enum TextUnit {
+    Char(char),
+    Emoji {
+        name: String,
+    },
+    Ruby {
+        base: Vec<Element>,
+        ruby: Vec<Element>,
+        scale: Option<f64>,
+        expand_line_height: bool,
+    },
 }
-impl CharState {
-    pub fn same_style(&self, other: &CharState) -> bool {
-        self.bold == other.bold
-            && self.italic == other.italic
-            && self.strikethrough == other.strikethrough
-            && (self.size - other.size).abs() < f64::EPSILON
-            && self.color == other.color
-            && self.font == other.font
-            && self.secondary_color == other.secondary_color
-            && (self.outline_size - other.outline_size).abs() < f64::EPSILON
+
+impl TextUnit {
+    pub fn as_char(&self) -> Option<char> {
+        match self {
+            Self::Char(value) => Some(*value),
+            Self::Emoji { .. } | Self::Ruby { .. } => None,
+        }
     }
-    pub fn to_style_control(&self) -> String {
-        let mut decoration = String::new();
-        if self.bold {
-            decoration.push('B');
+
+    pub fn is_whitespace(&self) -> bool {
+        self.as_char().is_some_and(char::is_whitespace)
+    }
+
+    pub fn segmentation_text(&self) -> String {
+        match self {
+            Self::Char(value) => value.to_string(),
+            Self::Emoji { .. } => "\u{fffc}".to_string(),
+            Self::Ruby { base, .. } => {
+                let text = elements_to_segmentation_text(base);
+                if text.is_empty() {
+                    "\u{fffc}".to_string()
+                } else {
+                    text
+                }
+            }
         }
-        if self.italic {
-            decoration.push('I');
-        }
-        if self.strikethrough {
-            decoration.push('S');
-        }
-        let size = &self.size;
-        let font = &self.font;
-        let color = &self.color;
-        let secondary_color = &self.secondary_color;
-        let outline_size = &self.outline_size;
-        format!("<s{size},{font},{decoration},{outline_size}><#{color},{secondary_color}>")
     }
 }
 
-pub fn char_states_to_text<'a, I: IntoIterator<Item = &'a CharState>>(
-    char_states: I,
-    time: f64,
-) -> String {
-    let mut result = String::new();
-    let mut current_style: Option<&CharState> = None;
+impl std::fmt::Display for TextUnit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Char(value) => write!(f, "{value}"),
+            Self::Emoji { name } => write!(f, "{}", Element::Emoji { name: name.clone() }),
+            Self::Ruby {
+                base,
+                ruby,
+                scale,
+                expand_line_height,
+            } => write!(
+                f,
+                "{}",
+                Element::Ruby {
+                    base: base.clone(),
+                    ruby: ruby.clone(),
+                    scale: *scale,
+                    expand_line_height: *expand_line_height,
+                }
+            ),
+        }
+    }
+}
+
+fn elements_to_segmentation_text(elements: &[Element]) -> String {
+    elements
+        .iter()
+        .map(|element| match element {
+            Element::Text(text) => text.clone(),
+            Element::Emoji { .. } => "\u{fffc}".to_string(),
+            Element::Ruby { base, .. } => elements_to_segmentation_text(base),
+            _ => String::new(),
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CharState {
+    pub unit: TextUnit,
+    pub control_index: usize,
+    pub start_time: f64,
+}
+
+#[derive(Debug)]
+pub struct EvaluatedChars {
+    pub chars: Vec<CharState>,
+    pub controls: Vec<Element>,
+}
+
+fn is_timing_control(control: &Element) -> bool {
+    matches!(control, Element::Speed { .. } | Element::Wait { .. })
+}
+
+pub fn controls_to_text(controls: &[Element], end: usize) -> String {
+    controls_between_to_text(controls, 0, end)
+}
+
+pub fn controls_between_to_text(controls: &[Element], start: usize, end: usize) -> String {
+    controls[start..end]
+        .iter()
+        .filter(|control| !is_timing_control(control))
+        .map(ToString::to_string)
+        .collect()
+}
+
+pub fn char_states_to_text(char_states: &[CharState], controls: &[Element], time: f64) -> String {
+    let Some(first) = char_states.first() else {
+        return String::new();
+    };
+
+    let mut result = controls_to_text(controls, first.control_index);
+    let mut emitted_controls = first.control_index;
     for char_state in char_states {
         if char_state.start_time > time {
             break;
         }
-        if let Some(current) = current_style {
-            if !current.same_style(char_state) {
-                result.push_str(&char_state.to_style_control());
-                current_style = Some(char_state);
-            }
-        } else {
-            result.push_str(&char_state.to_style_control());
-            current_style = Some(char_state);
-        }
-        result.push(char_state.char);
+        result.extend(
+            controls[emitted_controls..char_state.control_index]
+                .iter()
+                .filter(|control| !is_timing_control(control))
+                .map(ToString::to_string),
+        );
+        result.push_str(&char_state.unit.to_string());
+        emitted_controls = char_state.control_index;
     }
     result
 }
 
 pub fn evaluate_chars(
     text: &str,
-    base_state: &CharState,
+    initial_controls: Vec<Element>,
     base_speed: f64,
-) -> anyhow::Result<Vec<CharState>> {
+) -> EvaluatedChars {
     let parsed = aviutl2_text_parser::parse_control(text);
     let mut chars = Vec::new();
-    let mut current_state = base_state.clone();
+    let mut controls = initial_controls;
     let mut current_speed = base_speed;
+    let mut start_time = 0.0;
     let mut num_chars = 0;
+
     for item in parsed {
         let inv_speed = if current_speed == 0.0 {
             0.0
@@ -83,143 +149,67 @@ pub fn evaluate_chars(
             1.0 / current_speed
         };
         match item {
-            aviutl2_text_parser::Element::Text(text) => {
-                for c in text.chars() {
+            Element::Text(text) => {
+                for value in text.chars() {
                     chars.push(CharState {
-                        char: c,
-                        ..current_state.clone()
+                        unit: TextUnit::Char(value),
+                        control_index: controls.len(),
+                        start_time,
                     });
-                    if c != '\t' && c != '\n' {
-                        current_state.start_time += inv_speed;
+                    if value != '\t' && value != '\n' {
+                        start_time += inv_speed;
                         num_chars += 1;
                     }
                 }
             }
-            aviutl2_text_parser::Element::Color { code } => {
-                current_state.color = match code {
-                    aviutl2_text_parser::ColorType::Default => base_state.color.clone(),
-                    aviutl2_text_parser::ColorType::Single(color_value) => color_value.to_string(),
-                    aviutl2_text_parser::ColorType::Pair(color_value, secondary_color_value) => {
-                        current_state.secondary_color = secondary_color_value.to_string();
-                        color_value.to_string()
-                    }
-                };
+            Element::Emoji { name } => {
+                chars.push(CharState {
+                    unit: TextUnit::Emoji { name },
+                    control_index: controls.len(),
+                    start_time,
+                });
+                start_time += inv_speed;
+                num_chars += 1;
             }
-            aviutl2_text_parser::Element::Size {
-                size,
-                font,
-                decoration,
-                outline_size,
-            } => {
-                current_state.size = match size {
-                    aviutl2_text_parser::ScalarValue::Default => current_state.size,
-                    aviutl2_text_parser::ScalarValue::Absolute(value) => value,
-                    aviutl2_text_parser::ScalarValue::RelativeAdd(value) => {
-                        current_state.size + value
-                    }
-                    aviutl2_text_parser::ScalarValue::RelativeMul(value) => {
-                        current_state.size * value
-                    }
-                };
-                if let Some(font) = font {
-                    current_state.font = font;
-                }
-                if let Some(decoration) = decoration {
-                    current_state.bold = decoration.bold;
-                    current_state.italic = decoration.italic;
-                    current_state.strikethrough = decoration.strikethrough;
-                }
-                if let Some(outline_size) = outline_size {
-                    current_state.outline_size = outline_size;
-                }
-            }
-            aviutl2_text_parser::Element::Font { command } => match command {
-                aviutl2_text_parser::FontCommand::Set { name, .. } => {
-                    current_state.font = name.unwrap_or_default()
-                }
-                _ => anyhow::bail!("Unsupported font command: {:?}", command),
-            },
-
-            aviutl2_text_parser::Element::Speed { speed } => match speed {
-                Some(speed) => current_speed = speed,
-                None => current_speed = base_speed,
-            },
-            aviutl2_text_parser::Element::Wait { time } => match time {
-                aviutl2_text_parser::TimeValue::Absolute(v) => {
-                    current_state.start_time += v + inv_speed
-                }
-                aviutl2_text_parser::TimeValue::PerChar(v) => {
-                    current_state.start_time += v * num_chars as f64 + inv_speed
-                }
-            },
-            aviutl2_text_parser::Element::Clear { .. } => {
-                anyhow::bail!("Clear control is not supported");
-                // let clear_at = match time {
-                //     aviutl2_text_parser::TimeValue::Absolute(v) => {
-                //         current_state.start_time + v + inv_speed
-                //     }
-                //     aviutl2_text_parser::TimeValue::PerChar(v) => {
-                //         current_state.start_time + v * num_chars as f64 + inv_speed
-                //     }
-                // };
-                //
-                // for char_state in chars.iter_mut().rev() {
-                //     if char_state.end_time.is_none() {
-                //         char_state.end_time = Some(clear_at);
-                //     } else {
-                //         break;
-                //     }
-                // }
-            }
-            aviutl2_text_parser::Element::Position { .. } => {
-                anyhow::bail!("Position control is not supported");
-            }
-            aviutl2_text_parser::Element::Preset { name } => {
-                anyhow::bail!("Preset control is not supported: {:?}", name)
-            }
-            aviutl2_text_parser::Element::PositionReset => {
-                anyhow::bail!("PositionReset control is not supported")
-            }
-            aviutl2_text_parser::Element::GlyphSpacing { value } => {
-                anyhow::bail!("GlyphSpacing control is not supported: {:?}", value)
-            }
-            aviutl2_text_parser::Element::LineSpacing { value } => {
-                anyhow::bail!("LineSpacing control is not supported: {:?}", value)
-            }
-            aviutl2_text_parser::Element::ScaleX { value } => {
-                anyhow::bail!("ScaleX control is not supported: {:?}", value)
-            }
-            aviutl2_text_parser::Element::ScaleY { value } => {
-                anyhow::bail!("ScaleY control is not supported: {:?}", value)
-            }
-            aviutl2_text_parser::Element::Rotate { value } => {
-                anyhow::bail!("Rotate control is not supported: {:?}", value)
-            }
-            aviutl2_text_parser::Element::Emoji { name } => {
-                anyhow::bail!("Emoji control is not supported: {}", name)
-            }
-            aviutl2_text_parser::Element::Ruby {
+            Element::Ruby {
                 base,
                 ruby,
                 scale,
                 expand_line_height,
-            } => anyhow::bail!(
-                "Ruby control is not supported: base={:?}, ruby={:?}, scale={:?}, expand_line_height={}",
-                base,
-                ruby,
-                scale,
-                expand_line_height
-            ),
-            aviutl2_text_parser::Element::BlockEnd => {
-                // noop
+            } => {
+                chars.push(CharState {
+                    unit: TextUnit::Ruby {
+                        base,
+                        ruby,
+                        scale,
+                        expand_line_height,
+                    },
+                    control_index: controls.len(),
+                    start_time,
+                });
+                start_time += inv_speed;
+                num_chars += 1;
             }
-            aviutl2_text_parser::Element::Comment { text: _ } => {
-                // noop
+            Element::Speed { speed } => {
+                current_speed = speed.unwrap_or(base_speed);
+                controls.push(Element::Speed { speed });
             }
+            Element::Wait { time } => {
+                match time {
+                    aviutl2_text_parser::TimeValue::Absolute(value) => {
+                        start_time += value + inv_speed;
+                    }
+                    aviutl2_text_parser::TimeValue::PerChar(value) => {
+                        start_time += value * num_chars as f64 + inv_speed;
+                    }
+                }
+                controls.push(Element::Wait { time });
+            }
+            control => controls.push(control),
         }
     }
 
-    Ok(chars)
+    EvaluatedChars { chars, controls }
 }
 
 #[cfg(test)]
@@ -227,56 +217,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_evaluate_chars() {
-        let base_state = CharState {
-            char: ' ',
-            bold: false,
-            italic: false,
-            strikethrough: false,
-            size: 12.0,
-            color: "white".to_string(),
-            secondary_color: "black".to_string(),
-            outline_size: 0.0,
-            font: "Arial".to_string(),
-            start_time: 0.0,
-        };
-        let text = "Hello<#red>W<r2.0>orld<s1>!";
-        let chars = evaluate_chars(text, &base_state, 0.0).unwrap();
-        assert_eq!(chars.len(), 11);
-        assert_eq!(chars[0].char, 'H');
-        assert_eq!(chars[5].char, 'W');
-        assert_eq!(chars[5].color, "red");
-        assert_eq!(chars[5].start_time, 0.0);
-        assert_eq!(chars[7].char, 'r');
-        assert_eq!(chars[7].start_time, 0.5);
-        assert_eq!(chars[10].char, '!');
+    fn records_controls_and_restores_ranges() {
+        let evaluated = evaluate_chars("A<#ff0000>B<p+10>C", vec![], 0.0);
+        assert_eq!(evaluated.chars.len(), 3);
+        assert_eq!(
+            char_states_to_text(&evaluated.chars[1..], &evaluated.controls, f64::INFINITY),
+            "<#ff0000>B<p+10>C"
+        );
     }
 
     #[test]
-    fn test_break_tab_and_newline() {
-        let base_state = CharState {
-            char: ' ',
-            bold: false,
-            italic: false,
-            strikethrough: false,
-            size: 12.0,
-            color: "white".to_string(),
-            secondary_color: "black".to_string(),
-            outline_size: 0.0,
-            font: "Arial".to_string(),
-            start_time: 0.0,
-        };
-        let text = "Line1\nLine2\tTabbed";
-        let chars = evaluate_chars(text, &base_state, 1.0).unwrap();
-        assert_eq!(chars.len(), 18);
-        assert_eq!(chars[0].char, 'L');
-        assert_eq!(chars[1].char, 'i');
-        assert_eq!(chars[1].start_time, 1.0);
-        assert_eq!(chars[5].char, '\n');
-        assert_eq!(chars[6].char, 'L');
-        assert_eq!(chars[6].start_time, 5.0);
-        assert_eq!(chars[11].char, '\t');
-        assert_eq!(chars[12].char, 'T');
-        assert_eq!(chars[12].start_time, 10.0);
+    fn treats_emoji_and_ruby_as_single_units() {
+        let evaluated = evaluate_chars("</>制御文字<!0.4+>せいぎょもじ</><&いいね>B", vec![], 1.0);
+        assert_eq!(evaluated.chars.len(), 3);
+        assert!(matches!(evaluated.chars[0].unit, TextUnit::Ruby { .. }));
+        assert!(matches!(evaluated.chars[1].unit, TextUnit::Emoji { .. }));
+        assert_eq!(evaluated.chars[2].start_time, 2.0);
+        assert_eq!(evaluated.chars[0].unit.segmentation_text(), "制御文字");
+    }
+
+    #[test]
+    fn timing_controls_are_not_rendered() {
+        let evaluated = evaluate_chars("A<r2>B<w1>C", vec![], 1.0);
+        assert_eq!(evaluated.chars[1].start_time, 1.0);
+        assert_eq!(evaluated.chars[2].start_time, 3.0);
+        assert_eq!(
+            char_states_to_text(&evaluated.chars, &evaluated.controls, f64::INFINITY),
+            "ABC"
+        );
+    }
+
+    #[test]
+    fn tab_and_newline_do_not_advance_time() {
+        let evaluated = evaluate_chars("Line1\nLine2\tTabbed", vec![], 1.0);
+        assert_eq!(evaluated.chars.len(), 18);
+        assert_eq!(evaluated.chars[6].start_time, 5.0);
+        assert_eq!(evaluated.chars[12].start_time, 10.0);
     }
 }
