@@ -10,6 +10,14 @@
 ---step=1
 local width = 400
 
+---$select:自動分割
+---なし=0
+---日本語=1
+---簡体字中国語=2
+---繁体字中国語=3
+---タイ語=4
+local segmentation_mode = 1
+
 ---$select:両端揃え
 ---なし=0
 ---指定幅=1
@@ -99,6 +107,16 @@ local PI = {}
 
 -- PIからパラメータを取得
 if type(PI.width) == "number" then width = PI.width end
+if type(PI.detection) == "string" then
+  local detection_modes = {
+    none = 0,
+    ja = 1,
+    ["zh-hans"] = 2,
+    ["zh-hant"] = 3,
+    th = 4,
+  }
+  segmentation_mode = assert(detection_modes[PI.detection], "Unknown detection mode: " .. PI.detection)
+end
 if type(PI.justify) == "number" then justify = PI.justify end
 if type(PI.align) == "number" then align = PI.align end
 if type(PI.char_spacing) == "number" then char_spacing = PI.char_spacing end
@@ -201,6 +219,7 @@ local layout_success, layout_buffer_ptr_or_err, layout_buffer_length, layout_wid
     {
       lua_callback = callback_address,
       width = width,
+      segmentation_mode = segmentation_mode,
       align = align % 4,
       justify = justify,
       text = text,

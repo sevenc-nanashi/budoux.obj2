@@ -123,111 +123,130 @@ fn parse_bigram(input: std::collections::HashMap<String, i32>) -> BiGram {
 fn parse_trigram(input: std::collections::HashMap<String, i32>) -> TriGram {
     input
         .into_iter()
-        .map(|(key, value)| {
+        .filter_map(|(key, value)| {
             let mut chars = key.chars();
             let c1 = chars.next().expect("trigram key is empty");
             let c2 = chars.next().expect("trigram key must have 3 chars");
-            let c3 = chars.next().expect("trigram key must have 3 chars");
-            assert!(
-                chars.next().is_none(),
-                "trigram key must have exactly three chars: {key}",
-            );
-            ((c1, c2, c3), value)
+            let c3 = chars.next()?;
+            chars.next().is_none().then_some(((c1, c2, c3), value))
         })
         .collect()
 }
 
-static MODEL: std::sync::LazyLock<BudouxModel> = std::sync::LazyLock::new(|| {
-    let value =
-        include_json::include_json!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/model/ja.json"));
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Language {
+    Japanese,
+    SimplifiedChinese,
+    TraditionalChinese,
+    Thai,
+}
+
+struct ParserModel {
+    model: BudouxModel,
+    base_value: i32,
+}
+
+fn load_model(value: serde_json::Value) -> ParserModel {
     let raw: BudouxModelRaw = serde_json::from_value(value).expect("Bundled model is invalid");
-    BudouxModel::from_raw(raw)
-});
-static BASE_VALUE: std::sync::LazyLock<i32> = std::sync::LazyLock::new(|| {
-    let mut sum = 0;
-    for node in [
-        &MODEL.uw1,
-        &MODEL.uw2,
-        &MODEL.uw3,
-        &MODEL.uw4,
-        &MODEL.uw5,
-        &MODEL.uw6,
-    ] {
-        for score in node.values() {
-            sum += score;
-        }
-    }
-    for node in [&MODEL.bw1, &MODEL.bw2, &MODEL.bw3] {
-        for score in node.values() {
-            sum += score;
-        }
-    }
-    for node in [&MODEL.tw1, &MODEL.tw2, &MODEL.tw3, &MODEL.tw4] {
-        for score in node.values() {
-            sum += score;
-        }
-    }
+    let sum = [
+        &raw.uw1, &raw.uw2, &raw.uw3, &raw.uw4, &raw.uw5, &raw.uw6, &raw.bw1, &raw.bw2, &raw.bw3,
+        &raw.tw1, &raw.tw2, &raw.tw3, &raw.tw4,
+    ]
+    .into_iter()
+    .flat_map(|node| node.values())
+    .sum::<i32>();
+    let model = BudouxModel::from_raw(raw);
 
-    -sum / 2
-});
+    ParserModel {
+        model,
+        base_value: -sum / 2,
+    }
+}
 
-pub fn segment(text: &str) -> Vec<String> {
+macro_rules! bundled_model {
+    ($name:ident, $file:literal) => {
+        static $name: std::sync::LazyLock<ParserModel> = std::sync::LazyLock::new(|| {
+            load_model(include_json::include_json!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                $file
+            )))
+        });
+    };
+}
+
+bundled_model!(JAPANESE_MODEL, "/src/model/ja.json");
+bundled_model!(SIMPLIFIED_CHINESE_MODEL, "/src/model/zh-hans.json");
+bundled_model!(TRADITIONAL_CHINESE_MODEL, "/src/model/zh-hant.json");
+bundled_model!(THAI_MODEL, "/src/model/th.json");
+
+fn get_model(language: Language) -> &'static ParserModel {
+    match language {
+        Language::Japanese => &JAPANESE_MODEL,
+        Language::SimplifiedChinese => &SIMPLIFIED_CHINESE_MODEL,
+        Language::TraditionalChinese => &TRADITIONAL_CHINESE_MODEL,
+        Language::Thai => &THAI_MODEL,
+    }
+}
+
+pub fn segment(text: &str, language: Language) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     if chars.is_empty() {
         return vec![];
     }
 
+    let parser = get_model(language);
+    let model = &parser.model;
     let mut result = vec![chars[0].to_string()];
 
     for i in 1..chars.len() {
-        let mut score = *BASE_VALUE;
+        let mut score = parser.base_value;
 
         if i > 2 {
-            score += MODEL.uw1.get(&chars[i - 3]).unwrap_or(&0);
+            score += model.uw1.get(&chars[i - 3]).unwrap_or(&0);
         }
         if i > 1 {
-            score += MODEL.uw2.get(&chars[i - 2]).unwrap_or(&0);
+            score += model.uw2.get(&chars[i - 2]).unwrap_or(&0);
         }
-        score += MODEL.uw3.get(&chars[i - 1]).unwrap_or(&0);
-        score += MODEL.uw4.get(&chars[i]).unwrap_or(&0);
+        score += model.uw3.get(&chars[i - 1]).unwrap_or(&0);
+        score += model.uw4.get(&chars[i]).unwrap_or(&0);
 
         if i + 1 < chars.len() {
-            score += MODEL.uw5.get(&chars[i + 1]).unwrap_or(&0);
+            score += model.uw5.get(&chars[i + 1]).unwrap_or(&0);
         }
         if i + 2 < chars.len() {
-            score += MODEL.uw6.get(&chars[i + 2]).unwrap_or(&0);
+            score += model.uw6.get(&chars[i + 2]).unwrap_or(&0);
         }
 
         if i > 1 {
-            score += MODEL.bw1.get(&(chars[i - 2], chars[i - 1])).unwrap_or(&0);
+            score += model.bw1.get(&(chars[i - 2], chars[i - 1])).unwrap_or(&0);
         }
         {
-            score += MODEL.bw2.get(&(chars[i - 1], chars[i])).unwrap_or(&0);
+            score += model.bw2.get(&(chars[i - 1], chars[i])).unwrap_or(&0);
         }
         if i + 1 < chars.len() {
-            score += MODEL.bw3.get(&(chars[i], chars[i + 1])).unwrap_or(&0);
+            score += model.bw3.get(&(chars[i], chars[i + 1])).unwrap_or(&0);
         }
 
         if i > 2 {
-            score += MODEL
+            score += model
                 .tw1
                 .get(&(chars[i - 3], chars[i - 2], chars[i - 1]))
                 .unwrap_or(&0);
         }
         if i > 1 {
-            score += MODEL
+            score += model
                 .tw2
                 .get(&(chars[i - 2], chars[i - 1], chars[i]))
                 .unwrap_or(&0);
         }
         if i + 1 < chars.len() {
-            score += MODEL
+            score += model
                 .tw3
                 .get(&(chars[i - 1], chars[i], chars[i + 1]))
                 .unwrap_or(&0);
         }
         if i + 2 < chars.len() {
-            score += MODEL
+            score += model
                 .tw4
                 .get(&(chars[i], chars[i + 1], chars[i + 2]))
                 .unwrap_or(&0);
@@ -248,9 +267,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_segment() {
-        let text = "私は学生です。";
-        let segments = segment(text);
-        assert_eq!(segments, vec!["私は", "学生です。"]);
+    fn test_segment_japanese() {
+        assert_eq!(
+            segment("私は学生です。", Language::Japanese),
+            vec!["私は", "学生です。"]
+        );
+    }
+
+    #[test]
+    fn test_segment_simplified_chinese() {
+        assert_eq!(
+            segment("今天是晴天。", Language::SimplifiedChinese),
+            vec!["今天", "是", "晴天。"]
+        );
+    }
+
+    #[test]
+    fn test_segment_traditional_chinese() {
+        assert_eq!(
+            segment("今天是晴天。", Language::TraditionalChinese),
+            vec!["今天", "是", "晴天。"]
+        );
+    }
+
+    #[test]
+    fn test_segment_thai() {
+        assert_eq!(
+            segment("วันนี้อากาศดี", Language::Thai),
+            vec!["วัน", "นี้", "อากาศ", "ดี"]
+        );
     }
 }

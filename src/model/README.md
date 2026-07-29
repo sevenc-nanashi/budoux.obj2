@@ -1,4 +1,4 @@
-Model taken from [google/budoux](https://github.com/google/budoux/blob/main/budoux/models/ja.json), licensed under the Apache License 2.0.
+Models taken from [google/budoux](https://github.com/google/budoux/tree/main/budoux/models), licensed under the Apache License 2.0.
 
 ```
                                  Apache License

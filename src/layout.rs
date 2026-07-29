@@ -83,6 +83,7 @@ pub struct LayoutParams {
     pub width: usize,
     pub align: HorizontalAlign,
     pub justify: Justify,
+    pub segmentation_mode: segment::SegmentationMode,
     pub text: String,
     pub size: f64,
     pub line_spacing: f64,
@@ -121,6 +122,7 @@ fn build_wrapped_lines(
     decoration: FullTextDecoration,
     char_spacing: f64,
     width: usize,
+    segmentation_mode: segment::SegmentationMode,
 ) -> aviutl2::AnyResult<Vec<WrappedLine>> {
     let mut wrapped_lines: Vec<WrappedLine> = Vec::new();
     for SourceLine {
@@ -136,7 +138,7 @@ fn build_wrapped_lines(
             });
             continue;
         }
-        let mut segmented = segment::segment(line_chars)
+        let mut segmented = segment::segment(line_chars, segmentation_mode)
             .into_iter()
             .collect::<std::collections::VecDeque<_>>();
         let mut current_line = vec![];
@@ -380,6 +382,7 @@ pub fn layout(
         width,
         align,
         justify,
+        segmentation_mode,
         text,
         size,
         line_spacing,
@@ -456,6 +459,7 @@ pub fn layout(
         decoration,
         char_spacing,
         width,
+        segmentation_mode,
     )
     .context("Failed to build wrapped lines")?;
     tracing::trace!("wrapped_lines: {wrapped_lines:#?}");

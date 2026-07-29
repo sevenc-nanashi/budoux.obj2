@@ -1,5 +1,48 @@
 use crate::evaluate_chars::CharState;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentationMode {
+    WhitespaceOnly,
+    Japanese,
+    SimplifiedChinese,
+    TraditionalChinese,
+    Thai,
+}
+
+impl SegmentationMode {
+    fn language(self) -> Option<crate::budoux::Language> {
+        match self {
+            Self::WhitespaceOnly => None,
+            Self::Japanese => Some(crate::budoux::Language::Japanese),
+            Self::SimplifiedChinese => Some(crate::budoux::Language::SimplifiedChinese),
+            Self::TraditionalChinese => Some(crate::budoux::Language::TraditionalChinese),
+            Self::Thai => Some(crate::budoux::Language::Thai),
+        }
+    }
+}
+
+impl<'a> aviutl2::module::FromScriptModuleParamTable<'a> for SegmentationMode {
+    type Error = aviutl2::module::ParamConversionError;
+
+    fn from_param_table(
+        param: &'a aviutl2::module::ScriptModuleParamTable,
+        key: &str,
+    ) -> Result<Self, aviutl2::module::GetParamError<Self::Error>> {
+        match param.get_int(key) {
+            0 => Ok(Self::WhitespaceOnly),
+            1 => Ok(Self::Japanese),
+            2 => Ok(Self::SimplifiedChinese),
+            3 => Ok(Self::TraditionalChinese),
+            4 => Ok(Self::Thai),
+            value => Err(aviutl2::module::GetParamError::ConversionError(
+                aviutl2::module::ParamConversionError::new(format!(
+                    "Invalid segmentation mode: {value}. Expected a value from 0 to 4.",
+                )),
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum WrappedBy {
     Whitespace(Vec<CharState>),
@@ -49,7 +92,10 @@ pub fn segment_manually(char_states: &[CharState]) -> Vec<Segment> {
     result
 }
 
-pub fn segment_with_budoux(char_states: &[CharState]) -> Vec<Segment> {
+pub fn segment_with_budoux(
+    char_states: &[CharState],
+    language: crate::budoux::Language,
+) -> Vec<Segment> {
     let mut owners = Vec::new();
     let text: String = char_states
         .iter()
@@ -60,7 +106,7 @@ pub fn segment_with_budoux(char_states: &[CharState]) -> Vec<Segment> {
             text
         })
         .collect();
-    let text_segments = crate::budoux::segment(&text);
+    let text_segments = crate::budoux::segment(&text, language);
     let mut result = Vec::new();
     let mut char_index = 0;
     let mut unit_index = 0;
@@ -136,8 +182,8 @@ pub fn segment_with_whitespace(char_states: &[CharState]) -> Vec<Segment> {
     result
 }
 
-pub fn segment(char_states: &[CharState]) -> Vec<Segment> {
-    segment_with_whitespace(char_states)
+pub fn segment(char_states: &[CharState], mode: SegmentationMode) -> Vec<Segment> {
+    let segments = segment_with_whitespace(char_states)
         .into_iter()
         .flat_map(|segment| {
             let mut segments = segment_manually(&segment.chars);
@@ -145,9 +191,13 @@ pub fn segment(char_states: &[CharState]) -> Vec<Segment> {
                 first.wrapped_by = segment.wrapped_by;
             }
             segments
-        })
+        });
+    let Some(language) = mode.language() else {
+        return segments.collect();
+    };
+    segments
         .flat_map(|segment| {
-            let mut segments = segment_with_budoux(&segment.chars);
+            let mut segments = segment_with_budoux(&segment.chars, language);
             if let Some(first) = segments.first_mut() {
                 first.wrapped_by = segment.wrapped_by;
             }
@@ -191,7 +241,7 @@ mod tests {
             .chars()
             .map(make_char_state)
             .collect::<Vec<_>>();
-        let segments = segment_with_budoux(&char_states);
+        let segments = segment_with_budoux(&char_states, crate::budoux::Language::Japanese);
         let texts = segments
             .iter()
             .map(|s| states_to_text(&s.chars))
@@ -208,7 +258,7 @@ mod tests {
             make_char_state('で'),
             make_char_state('す'),
         ];
-        let segments = segment_with_budoux(&char_states);
+        let segments = segment_with_budoux(&char_states, crate::budoux::Language::Japanese);
         let flattened = segments
             .iter()
             .flat_map(|segment| segment.chars.iter())
@@ -285,5 +335,33 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(texts, vec!["私は学生です。"]);
         assert!(matches!(segments[0].wrapped_by, WrappedBy::None));
+    }
+
+    #[test]
+    fn test_whitespace_only_mode_does_not_use_budoux() {
+        let char_states = "私は学生です。"
+            .chars()
+            .map(make_char_state)
+            .collect::<Vec<_>>();
+        let segments = segment(&char_states, SegmentationMode::WhitespaceOnly);
+        assert_eq!(segments.len(), 1);
+        assert_eq!(states_to_text(&segments[0].chars), "私は学生です。");
+    }
+
+    #[test]
+    fn test_all_language_modes_split_at_whitespace_first() {
+        for mode in [
+            SegmentationMode::Japanese,
+            SegmentationMode::SimplifiedChinese,
+            SegmentationMode::TraditionalChinese,
+            SegmentationMode::Thai,
+        ] {
+            let char_states = "前 後".chars().map(make_char_state).collect::<Vec<_>>();
+            let segments = segment(&char_states, mode);
+            assert_eq!(segments.len(), 2, "mode: {mode:?}");
+            assert_eq!(states_to_text(&segments[0].chars), "前");
+            assert_eq!(states_to_text(&segments[1].chars), "後");
+            assert!(matches!(segments[1].wrapped_by, WrappedBy::Whitespace(_)));
+        }
     }
 }

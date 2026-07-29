@@ -16,6 +16,8 @@ BudouXという機械学習モデルに基づき、文章を自動的に改行�
   例：`AviUtl 2.0`と書かれていて、`AviUtl`で行が埋まった場合、`AviUtl<改行>2.0`と改行されます。
 - `\b`と書くと文節の区切りとして認識されます。\
   例：`AviUtl\b2.0`の場合、`AviUtl` と `2.0` の間で単語が区切られたとして認識されます。ただし、`AviUtl`で行を使い果たさなかった場合は、`AviUtl2.0`と表示されます。
+- 自動分割は「なし」「日本語」「簡体字中国語」「繁体字中国語」「タイ語」から選択できます。
+  どの設定でも空白を先に区切りとして扱い、「なし」以外では各言語のBudouXモデルを追加で適用します。
 - PSDToolkit2と併用することもできます。PSDToolkit2の字幕表示を配置し、そのテキスト欄の内容をこのスクリプトのテキスト欄に貼り付けてください。
 
 ## インストール
@@ -31,23 +33,24 @@ PIによって設定された値はトラックバーによる指定より優先
 
 ### キー一覧
 
-| キー              | 型      | 説明               |
-| ----------------- | ------- | ------------------ |
-| `width`           | number  | 横幅               |
-| `justify`         | number  | 両端揃え（0〜2）   |
-| `align`           | number  | 揃え（0〜11）      |
-| `char_spacing`    | number  | 字間               |
-| `line_spacing`    | number  | 行間               |
-| `speed`           | number  | 表示速度           |
-| `size`            | number  | フォントサイズ     |
-| `font`            | string  | フォント名         |
-| `color`           | number  | 文字色             |
-| `secondary_color` | number  | 影・縁色           |
-| `decoration`      | number  | 装飾タイプ（0〜6） |
-| `bold`            | boolean | 太字               |
-| `italic`          | boolean | 斜体               |
-| `text`            | string  | テキスト           |
-| `debug`           | boolean | デバッグモード     |
+| キー              | 型      | 説明                                                       |
+| ----------------- | ------- | ---------------------------------------------------------- |
+| `width`           | number  | 横幅                                                       |
+| `detection`       | string  | 自動分割（`none`、`ja`、`zh-hans`、`zh-hant`、`th`） |
+| `justify`         | number  | 両端揃え（0〜2）                                           |
+| `align`           | number  | 揃え（0〜11）                                              |
+| `char_spacing`    | number  | 字間                                                       |
+| `line_spacing`    | number  | 行間                                                       |
+| `speed`           | number  | 表示速度                                                   |
+| `size`            | number  | フォントサイズ                                             |
+| `font`            | string  | フォント名                                                 |
+| `color`           | number  | 文字色                                                     |
+| `secondary_color` | number  | 影・縁色                                                   |
+| `decoration`      | number  | 装飾タイプ（0〜6）                                         |
+| `bold`            | boolean | 太字                                                       |
+| `italic`          | boolean | 斜体                                                       |
+| `text`            | string  | テキスト                                                   |
+| `debug`           | boolean | デバッグモード                                             |
 
 ## ライセンス
 

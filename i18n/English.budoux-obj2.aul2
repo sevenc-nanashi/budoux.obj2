@@ -1,6 +1,11 @@
 [budoux.obj2]
 レイアウト=Layout
 横幅=Width
+自動分割=Detection
+日本語=Japanese
+簡体字中国語=Simplified Chinese
+繁体字中国語=Traditional Chinese
+タイ語=Thai
 両端揃え=Justify
 なし=None
 指定幅=Specified Width
