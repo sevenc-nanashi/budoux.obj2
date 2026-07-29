@@ -332,6 +332,14 @@ pub fn layout(
     }: LayoutParams,
 ) -> aviutl2::AnyResult<(Vec<u8>, f64, f64)> {
     let lua_handle = LuaHandle::new(lua_callback).context("Failed to create LuaHandle")?;
+    let text = aviutl2_text_parser::process_scripts(&text, |script, is_inline| {
+        if is_inline {
+            lua_handle.evaluate_inline_script(&format!("mes({script})"))
+        } else {
+            lua_handle.evaluate_inline_script(script)
+        }
+    })
+    .context("Failed to process inline scripts")?;
     let chars = evaluate_chars(
         &text,
         &crate::evaluate_chars::CharState {

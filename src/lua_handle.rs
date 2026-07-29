@@ -52,6 +52,9 @@ enum LuaRequest {
         decoration: FullTextDecoration,
         char_spacing: f64,
     },
+    EvaluateInlineScript {
+        script: String,
+    },
 }
 
 #[derive(
@@ -149,5 +152,16 @@ impl LuaHandle {
 
         LAYOUT_CACHE.insert(cache_key, (result.width, result.height));
         Ok((result.width, result.height))
+    }
+
+    pub fn evaluate_inline_script(&self, script: &str) -> anyhow::Result<String> {
+        let request = LuaRequest::EvaluateInlineScript {
+            script: script.to_string(),
+        };
+        let buffer = serde_luajit_buffer::serialize_one(&request, &Default::default())?;
+        unsafe { (self.callback)(buffer.as_ptr(), buffer.len()) };
+        let result = pop_return_stack::<String>().context("Failed to pop from return stack")?;
+        tracing::debug!("evaluate_inline_script result: {}", result);
+        Ok(result)
     }
 }

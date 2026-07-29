@@ -174,9 +174,6 @@ pub fn evaluate_chars(
             aviutl2_text_parser::Element::Position { .. } => {
                 anyhow::bail!("Position control is not supported");
             }
-            aviutl2_text_parser::Element::Script { .. } => {
-                anyhow::bail!("Script control is not supported");
-            }
             aviutl2_text_parser::Element::Preset { name } => {
                 anyhow::bail!("Preset control is not supported: {:?}", name)
             }
@@ -207,17 +204,17 @@ pub fn evaluate_chars(
                 scale,
                 expand_line_height,
             } => anyhow::bail!(
-                "Ruby control is not supported: base={}, ruby={}, scale={:?}, expand_line_height={}",
+                "Ruby control is not supported: base={:?}, ruby={:?}, scale={:?}, expand_line_height={}",
                 base,
                 ruby,
                 scale,
                 expand_line_height
             ),
             aviutl2_text_parser::Element::BlockEnd => {
-                anyhow::bail!("BlockEnd control is not supported")
+                // noop
             }
-            aviutl2_text_parser::Element::Comment { text } => {
-                anyhow::bail!("Comment control is not supported: {}", text)
+            aviutl2_text_parser::Element::Comment { text: _ } => {
+                // noop
             }
         }
     }

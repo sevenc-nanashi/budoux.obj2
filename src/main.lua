@@ -121,70 +121,98 @@ local buffer = require("string.buffer")
 local mod = obj.module("budoux")
 
 local function lua_callback(str_ptr, str_len)
-    local request = buffer.decode(ffi.string(str_ptr, str_len))
-    if debug then
-        print("@verbose", "Received callback:", request)
+  local request = buffer.decode(ffi.string(str_ptr, str_len))
+  if debug then
+    print("@verbose", "Received callback:", request)
+  end
+  if request.type == "text_layout" then
+    obj.setfont("", 0, request.data.decoration, 0, 0, false, false, request.data.char_spacing)
+    local text_width, text_height = obj.load("textlayout", request.data.text)
+    local response = buffer.encode({ width = text_width, height = text_height })
+    local response_address = tostring(ffi.cast("intptr_t", ffi.cast("const uint8_t*", response)))
+    mod.push_stack(response_address, #response)
+  elseif request.type == "evaluate_inline_script" then
+    local messages = ""
+
+    local inner_obj = {
+      mes = function(msg)
+        messages = messages .. tostring(msg)
+      end,
+    }
+    setmetatable(inner_obj, { __index = obj })
+    local inner_G = { obj = inner_obj, mes = inner_obj.mes }
+    setmetatable(inner_G, { __index = _G })
+
+    local func, err = loadstring(request.data.script)
+    if not func then
+      mod.push_stack_error("Error loading script: " .. tostring(err))
+      return
     end
-    if request.type == "text_layout" then
-        obj.setfont("", 0, request.data.decoration, 0, 0, false, false, request.data.char_spacing)
-        local text_width, text_height = obj.load("textlayout", request.data.text)
-        local response = buffer.encode({ width = text_width, height = text_height })
-        local response_address = tostring(ffi.cast("intptr_t", ffi.cast("const uint8_t*", response)))
-        mod.push_stack(response_address, #response)
-    else
-        print("@warn", "Unknown request type:", request.type)
-        mod.push_stack_error("Unknown request type")
+
+    setfenv(func, inner_G)
+    local success, result = pcall(func)
+    if not success then
+      mod.push_stack_error("Error executing script: " .. tostring(result))
+      return
     end
+
+    local response = buffer.encode(messages)
+    local response_address = tostring(ffi.cast("intptr_t", ffi.cast("const uint8_t*", response)))
+    mod.push_stack(response_address, #response)
+  else
+    print("@warn", "Unknown request type:", request.type)
+    mod.push_stack_error("Unknown request type")
+  end
 end
 
 local function lua_callback_wrapper(str_ptr, str_len)
-    local success, err = pcall(lua_callback, str_ptr, str_len)
-    if not success then
-        print("@warn", "Lua callback error:", err)
-        mod.push_stack_error(err)
-    end
+  local success, err = pcall(lua_callback, str_ptr, str_len)
+  if not success then
+    print("@warn", "Lua callback error:", err)
+    mod.push_stack_error(err)
+  end
 end
 
 local outline_size = 0
 if decoration == 3 then
-    outline_size = size * 0.15
+  outline_size = size * 0.15
 elseif decoration == 4 then
-    outline_size = size * 0.075
+  outline_size = size * 0.075
 elseif decoration == 5 then
-    outline_size = size * 0.225
+  outline_size = size * 0.225
 elseif decoration == 6 then
-    outline_size = size * 0.075
+  outline_size = size * 0.075
 end
 
 local callback = ffi.cast("void (*)(const uint8_t*, size_t)", lua_callback_wrapper)
 local callback_address = tostring(ffi.cast("intptr_t", callback))
 local layout_success, layout_buffer_ptr_or_err, layout_buffer_length, layout_width, layout_height = pcall(function()
-    return mod.layout(
-        {
-            lua_callback = callback_address,
-            width = width,
-            align = align % 4,
-            justify = justify,
-            text = text,
-            size = size,
-            char_spacing = char_spacing,
-            line_spacing = line_spacing,
-            show_speed = speed,
-            font = font,
-            color = color,
-            secondary_color = secondary_color,
-            decoration = decoration,
-            outline_size = outline_size,
-            bold = bold,
-            italic = italic,
-            time = obj.time
-        }
-    )
+  return mod.layout(
+    {
+      lua_callback = callback_address,
+      width = width,
+      align = align % 4,
+      justify = justify,
+      text = text,
+      size = size,
+      char_spacing = char_spacing,
+      line_spacing = line_spacing,
+      show_speed = speed,
+      font = font,
+      color = color,
+      secondary_color = secondary_color,
+      decoration = decoration,
+      outline_size = outline_size,
+      bold = bold,
+      italic = italic,
+      time = obj.time
+    }
+  )
 end)
 
 callback:free()
 if not layout_success then
-    error("Layout error: " .. tostring(layout_buffer_ptr_or_err))
+  error("Layout error: " .. tostring(layout_buffer_ptr_or_err))
 end
 local layout_buffer = ffi.string(layout_buffer_ptr_or_err, layout_buffer_length)
 mod.free_buffer(layout_buffer_ptr_or_err)
@@ -195,18 +223,18 @@ local vertical_align = math.floor(align / 4)
 obj.setoption("drawtarget", "tempbuffer", layout_width, layout_height)
 obj.setfont("", 0, decoration, 0, 0, false, false, char_spacing)
 for _, item in ipairs(layout) do
-    obj.load("text", item.content)
-    obj.draw(item.position[1] - layout_width / 2, item.position[2] - layout_height / 2)
+  obj.load("text", item.content)
+  obj.draw(item.position[1] - layout_width / 2, item.position[2] - layout_height / 2)
 end
 obj.setoption("drawtarget", "framebuffer")
 obj.load("tempbuffer")
 if vertical_align == 0 then
-    obj.cy = -layout_height / 2
+  obj.cy = -layout_height / 2
 elseif vertical_align == 2 then
-    obj.cy = layout_height / 2
+  obj.cy = layout_height / 2
 end
 if horizontal_align == 0 then
-    obj.cx = -layout_width / 2
+  obj.cx = -layout_width / 2
 elseif horizontal_align == 2 then
-    obj.cx = layout_width / 2
+  obj.cx = layout_width / 2
 end

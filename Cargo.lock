@@ -85,7 +85,7 @@ dependencies = [
 [[package]]
 name = "aviutl2-text-parser"
 version = "0.1.0"
-source = "git+https://github.com/sevenc-nanashi/aviutl2-text-parser#635114f0debafb5097706a71749c423fb18c0069"
+source = "git+https://github.com/sevenc-nanashi/aviutl2-text-parser#6217834f9b49d1ce1a1a979ce54dc3b088b885ad"
 dependencies = [
  "lazy-regex",
 ]
