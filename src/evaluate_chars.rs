@@ -133,7 +133,13 @@ pub fn evaluate_chars(
                     current_state.outline_size = outline_size;
                 }
             }
-            aviutl2_text_parser::Element::Font { name } => current_state.font = name,
+            aviutl2_text_parser::Element::Font { command } => match command {
+                aviutl2_text_parser::FontCommand::Set { name, .. } => {
+                    current_state.font = name.unwrap_or_default()
+                }
+                _ => anyhow::bail!("Unsupported font command: {:?}", command),
+            },
+
             aviutl2_text_parser::Element::Speed { speed } => match speed {
                 Some(speed) => current_speed = speed,
                 None => current_speed = base_speed,
@@ -170,6 +176,48 @@ pub fn evaluate_chars(
             }
             aviutl2_text_parser::Element::Script { .. } => {
                 anyhow::bail!("Script control is not supported");
+            }
+            aviutl2_text_parser::Element::Preset { name } => {
+                anyhow::bail!("Preset control is not supported: {:?}", name)
+            }
+            aviutl2_text_parser::Element::PositionReset => {
+                anyhow::bail!("PositionReset control is not supported")
+            }
+            aviutl2_text_parser::Element::GlyphSpacing { value } => {
+                anyhow::bail!("GlyphSpacing control is not supported: {:?}", value)
+            }
+            aviutl2_text_parser::Element::LineSpacing { value } => {
+                anyhow::bail!("LineSpacing control is not supported: {:?}", value)
+            }
+            aviutl2_text_parser::Element::ScaleX { value } => {
+                anyhow::bail!("ScaleX control is not supported: {:?}", value)
+            }
+            aviutl2_text_parser::Element::ScaleY { value } => {
+                anyhow::bail!("ScaleY control is not supported: {:?}", value)
+            }
+            aviutl2_text_parser::Element::Rotate { value } => {
+                anyhow::bail!("Rotate control is not supported: {:?}", value)
+            }
+            aviutl2_text_parser::Element::Emoji { name } => {
+                anyhow::bail!("Emoji control is not supported: {}", name)
+            }
+            aviutl2_text_parser::Element::Ruby {
+                base,
+                ruby,
+                scale,
+                expand_line_height,
+            } => anyhow::bail!(
+                "Ruby control is not supported: base={}, ruby={}, scale={:?}, expand_line_height={}",
+                base,
+                ruby,
+                scale,
+                expand_line_height
+            ),
+            aviutl2_text_parser::Element::BlockEnd => {
+                anyhow::bail!("BlockEnd control is not supported")
+            }
+            aviutl2_text_parser::Element::Comment { text } => {
+                anyhow::bail!("Comment control is not supported: {}", text)
             }
         }
     }

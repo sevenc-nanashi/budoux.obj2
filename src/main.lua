@@ -114,31 +114,31 @@ if type(PI.italic) == "boolean" then italic = PI.italic end
 if type(PI.text) == "string" then text = PI.text end
 if type(PI.debug) == "boolean" then debug = PI.debug end
 
+obj.setanchor("width,size", 1)
+
 local ffi = require("ffi")
+local buffer = require("string.buffer")
 local mod = obj.module("budoux")
 
----$embed
-local json = require("json")
-
-local function lua_callback(str)
-    -- local width, height = obj.load("textlayout", ffi.string(str))
-    -- mod.push_stack(string.format("%d,%d", width, height))
-    local request = json.decode(ffi.string(str))
+local function lua_callback(str_ptr, str_len)
+    local request = buffer.decode(ffi.string(str_ptr, str_len))
     if debug then
         print("@verbose", "Received callback:", request)
     end
     if request.type == "text_layout" then
         obj.setfont("", 0, request.data.decoration, 0, 0, false, false, request.data.char_spacing)
         local text_width, text_height = obj.load("textlayout", request.data.text)
-        mod.push_stack(json.encode({ width = text_width, height = text_height }))
+        local response = buffer.encode({ width = text_width, height = text_height })
+        local response_address = tostring(ffi.cast("intptr_t", ffi.cast("const uint8_t*", response)))
+        mod.push_stack(response_address, #response)
     else
         print("@warn", "Unknown request type:", request.type)
         mod.push_stack_error("Unknown request type")
     end
 end
 
-local function lua_callback_wrapper(str)
-    local success, err = pcall(lua_callback, str)
+local function lua_callback_wrapper(str_ptr, str_len)
+    local success, err = pcall(lua_callback, str_ptr, str_len)
     if not success then
         print("@warn", "Lua callback error:", err)
         mod.push_stack_error(err)
@@ -156,9 +156,9 @@ elseif decoration == 6 then
     outline_size = size * 0.075
 end
 
-local callback = ffi.cast("void (*)(const char*)", lua_callback_wrapper)
+local callback = ffi.cast("void (*)(const uint8_t*, size_t)", lua_callback_wrapper)
 local callback_address = tostring(ffi.cast("intptr_t", callback))
-local layout_success, layout_json_or_err, layout_width, layout_height = pcall(function()
+local layout_success, layout_buffer_ptr_or_err, layout_buffer_length, layout_width, layout_height = pcall(function()
     return mod.layout(
         {
             lua_callback = callback_address,
@@ -184,9 +184,11 @@ end)
 
 callback:free()
 if not layout_success then
-    error("Layout error: " .. tostring(layout_json_or_err))
+    error("Layout error: " .. tostring(layout_buffer_ptr_or_err))
 end
-local layout = json.decode(layout_json_or_err)
+local layout_buffer = ffi.string(layout_buffer_ptr_or_err, layout_buffer_length)
+mod.free_buffer(layout_buffer_ptr_or_err)
+local layout = buffer.decode(layout_buffer)
 
 local horizontal_align = align % 4
 local vertical_align = math.floor(align / 4)

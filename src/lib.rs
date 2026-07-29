@@ -3,6 +3,7 @@ use aviutl2::{anyhow::Context, module::ScriptModuleFunctions, tracing};
 mod budoux;
 mod evaluate_chars;
 mod layout;
+mod lending;
 mod lua_handle;
 mod segment;
 
@@ -34,15 +35,35 @@ impl aviutl2::module::ScriptModule for BudouxMod2 {
 #[aviutl2::module::functions]
 #[allow(clippy::too_many_arguments)]
 impl BudouxMod2 {
-    fn layout(&self, params: layout::LayoutParams) -> aviutl2::AnyResult<(String, f64, f64)> {
+    fn layout(
+        &self,
+        params: layout::LayoutParams,
+    ) -> aviutl2::AnyResult<(*const u8, usize, f64, f64)> {
         let current = std::time::Instant::now();
-        let res = layout::layout(params);
+        let (buffer, width, height) = layout::layout(params)?;
         tracing::debug!("layout executed in {:?}", current.elapsed());
-        res
+        let (return_ptr, return_len) = lending::lend_buffer(buffer);
+        Ok((return_ptr, return_len, width, height))
     }
 
-    fn push_stack(&self, value: String) -> aviutl2::AnyResult<()> {
-        tracing::debug!("push_stack called with value: {:?}", value);
+    fn free_buffer(&self, ptr: std::ptr::NonNull<u8>) -> aviutl2::AnyResult<()> {
+        tracing::debug!("free_buffer called with ptr: {:?}", ptr);
+        if lending::release_buffer(ptr.as_ptr()) {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "Failed to release buffer for pointer: {:?}",
+                ptr
+            ))
+        }
+    }
+
+    fn push_stack(&self, ptr: String, len: usize) -> aviutl2::AnyResult<()> {
+        let ptr: usize = ptr.trim_end_matches("LL").parse()?;
+        let ptr =
+            std::ptr::NonNull::new(ptr as *mut u8).context("push_stack received a null pointer")?;
+        let value = unsafe { std::slice::from_raw_parts(ptr.as_ptr(), len) }.to_vec();
+        tracing::debug!("push_stack called with {} bytes", value.len());
         lua_handle::push_return_stack(value).context("Failed to push to return stack")?;
         Ok(())
     }

@@ -1,14 +1,15 @@
 use anyhow::Context;
+use aviutl2::tracing;
 
-type LuaCallback = unsafe extern "C" fn(*const std::os::raw::c_char) -> ();
+type LuaCallback = unsafe extern "C" fn(*const u8, usize);
 pub struct LuaHandle {
     callback: LuaCallback,
 }
 unsafe impl Send for LuaHandle {}
 
-static RETURN_STACK: std::sync::Mutex<Vec<Result<String, String>>> =
+static RETURN_STACK: std::sync::Mutex<Vec<Result<Vec<u8>, String>>> =
     std::sync::Mutex::new(Vec::new());
-pub fn push_return_stack(value: String) -> anyhow::Result<()> {
+pub fn push_return_stack(value: Vec<u8>) -> anyhow::Result<()> {
     let mut stack = RETURN_STACK.lock().unwrap();
     stack.push(Ok(value));
     Ok(())
@@ -20,12 +21,27 @@ pub fn push_return_stack_error(error: String) -> anyhow::Result<()> {
 }
 fn pop_return_stack<T: serde::de::DeserializeOwned>() -> anyhow::Result<T> {
     let mut stack = RETURN_STACK.lock().unwrap();
-    let result_json = stack
+    let result_buffer = stack
         .pop()
         .context("Return stack is empty")?
         .map_err(|e| anyhow::anyhow!("Lua callback error: {e}"))?;
-
-    Ok(serde_json::from_str(&result_json)?)
+    tracing::debug!(
+        "pop_return_stack called, result_buffer length: {}",
+        result_buffer.len()
+    );
+    match serde_luajit_buffer::deserialize_one::<T>(&result_buffer, &Default::default()) {
+        Ok(value) => Ok(value),
+        Err(e) => {
+            tracing::error!(
+                "Failed to deserialize return value from Lua callback: {:?}",
+                e
+            );
+            Err(anyhow::anyhow!(
+                "Failed to deserialize return value: {:?}",
+                e
+            ))
+        }
+    }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -62,16 +78,22 @@ pub enum FullTextDecoration {
 }
 
 impl<'a> aviutl2::module::FromScriptModuleParamTable<'a> for FullTextDecoration {
+    type Error = serde::de::value::Error;
+
     fn from_param_table(
         param: &'a aviutl2::module::ScriptModuleParamTable,
         key: &str,
-    ) -> Option<Self> {
+    ) -> Result<
+        FullTextDecoration,
+        aviutl2::module::GetParamError<serde::de::value::Error>,
+    > {
         use serde::Deserialize;
         use serde::de::IntoDeserializer;
         let value = param.get_int(key);
         let deserializer: serde::de::value::I32Deserializer<serde::de::value::Error> =
             value.into_deserializer();
-        Self::deserialize(deserializer).ok()
+        Self::deserialize(deserializer)
+            .map_err(aviutl2::module::GetParamError::ConversionError)
     }
 }
 
@@ -110,9 +132,8 @@ impl LuaHandle {
             decoration,
             char_spacing,
         };
-        let json = serde_json::to_string(&request)?;
-        let c_string = std::ffi::CString::new(json)?;
-        unsafe { (self.callback)(c_string.as_ptr()) };
+        let buffer = serde_luajit_buffer::serialize_one(&request, &Default::default())?;
+        unsafe { (self.callback)(buffer.as_ptr(), buffer.len()) };
         #[derive(serde::Deserialize)]
         struct ReturnValue {
             width: usize,
@@ -120,6 +141,11 @@ impl LuaHandle {
         }
         let result =
             pop_return_stack::<ReturnValue>().context("Failed to pop from return stack")?;
+        tracing::debug!(
+            "text_layout result: width={}, height={}",
+            result.width,
+            result.height
+        );
 
         LAYOUT_CACHE.insert(cache_key, (result.width, result.height));
         Ok((result.width, result.height))

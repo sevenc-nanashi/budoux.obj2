@@ -17,16 +17,22 @@ pub enum Justify {
     LongestLine,
 }
 impl<'a> aviutl2::module::FromScriptModuleParamTable<'a> for Justify {
+    type Error = aviutl2::module::ParamConversionError;
     fn from_param_table(
         param: &'a aviutl2::module::ScriptModuleParamTable,
         key: &str,
-    ) -> Option<Self> {
+    ) -> Result<Self, aviutl2::module::GetParamError<Self::Error>> {
         let value = param.get_int(key);
         match value {
-            0 => Some(Self::No),
-            1 => Some(Self::SpecifiedWidth),
-            2 => Some(Self::LongestLine),
-            _ => None,
+            0 => Ok(Self::No),
+            1 => Ok(Self::SpecifiedWidth),
+            2 => Ok(Self::LongestLine),
+            _ => Err(aviutl2::module::GetParamError::ConversionError(
+                aviutl2::module::ParamConversionError::new(format!(
+                    "Invalid value for Justify: {}. Expected 0, 1, or 2.",
+                    value
+                )),
+            )),
         }
     }
 }
@@ -40,17 +46,23 @@ pub enum HorizontalAlign {
 }
 
 impl<'a> aviutl2::module::FromScriptModuleParamTable<'a> for HorizontalAlign {
+    type Error = aviutl2::module::ParamConversionError;
     fn from_param_table(
         param: &'a aviutl2::module::ScriptModuleParamTable,
         key: &str,
-    ) -> Option<Self> {
+    ) -> Result<Self, aviutl2::module::GetParamError<aviutl2::module::ParamConversionError>> {
         let value = param.get_int(key);
         match value {
-            0 => Some(Self::Left),
-            1 => Some(Self::Center),
-            2 => Some(Self::Right),
-            3 => Some(Self::Justify),
-            _ => None,
+            0 => Ok(Self::Left),
+            1 => Ok(Self::Center),
+            2 => Ok(Self::Right),
+            3 => Ok(Self::Justify),
+            _ => Err(aviutl2::module::GetParamError::ConversionError(
+                aviutl2::module::ParamConversionError::new(format!(
+                    "Invalid value for Justify: {}. Expected 0, 1, or 2.",
+                    value
+                )),
+            )),
         }
     }
 }
@@ -318,7 +330,7 @@ pub fn layout(
         italic,
         time,
     }: LayoutParams,
-) -> aviutl2::AnyResult<(String, f64, f64)> {
+) -> aviutl2::AnyResult<(Vec<u8>, f64, f64)> {
     let lua_handle = LuaHandle::new(lua_callback).context("Failed to create LuaHandle")?;
     let chars = evaluate_chars(
         &text,
@@ -400,7 +412,8 @@ pub fn layout(
     tracing::trace!("layouts: {layouts:#?}, height: {height}");
 
     Ok((
-        serde_json::to_string(&layouts).context("Failed to serialize layouts")?,
+        serde_luajit_buffer::serialize_one(&layouts, &Default::default())
+            .context("Failed to serialize layouts")?,
         width as f64,
         height,
     ))
