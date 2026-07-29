@@ -127,8 +127,14 @@ local function lua_callback(str_ptr, str_len)
   end
   if request.type == "text_layout" then
     obj.setfont("", 0, request.data.decoration, 0, 0, false, false, request.data.char_spacing)
-    local text_width, text_height = obj.load("textlayout", request.data.text)
-    local response = buffer.encode({ width = text_width, height = text_height })
+    local text_width, text_height, negative_center_x_delta, negative_center_y_delta = obj.load("text.layout",
+      request.data.text, 0, 0, 0)
+    local response = buffer.encode({
+      width = text_width,
+      height = text_height,
+      negative_center_x_delta = negative_center_x_delta + text_width / 2,
+      negative_center_y_delta = negative_center_y_delta + text_height / 2,
+    })
     local response_address = tostring(ffi.cast("intptr_t", ffi.cast("const uint8_t*", response)))
     mod.push_stack(response_address, #response)
   elseif request.type == "evaluate_inline_script" then
@@ -224,21 +230,41 @@ local layout = buffer.decode(layout_buffer)
 
 local horizontal_align = align % 4
 local vertical_align = math.floor(align / 4)
-obj.setoption("drawtarget", "tempbuffer", layout_width, layout_height)
+local buffer_left = 0
+local buffer_top = 0
+local buffer_right = layout_width
+local buffer_bottom = layout_height
+for _, item in ipairs(layout) do
+  buffer_left = math.min(buffer_left, math.floor(item.position[1] - item.size[1] / 2))
+  buffer_top = math.min(buffer_top, math.floor(item.position[2] - item.size[2] / 2))
+  buffer_right = math.max(buffer_right, math.ceil(item.position[1] + item.size[1] / 2))
+  buffer_bottom = math.max(buffer_bottom, math.ceil(item.position[2] + item.size[2] / 2))
+end
+local buffer_width = buffer_right - buffer_left
+local buffer_height = buffer_bottom - buffer_top
+
+obj.setoption("drawtarget", "tempbuffer", buffer_width, buffer_height)
 obj.setfont("", 0, decoration, 0, 0, false, false, char_spacing)
 for _, item in ipairs(layout) do
   obj.load("text", item.content)
-  obj.draw(item.position[1] - layout_width / 2, item.position[2] - layout_height / 2)
+  obj.draw(
+    item.position[1] - buffer_left - buffer_width / 2,
+    item.position[2] - buffer_top - buffer_height / 2
+  )
 end
 obj.setoption("drawtarget", "framebuffer")
 obj.load("tempbuffer")
 if vertical_align == 0 then
-  obj.cy = -layout_height / 2
+  obj.cy = -buffer_top - buffer_height / 2
+elseif vertical_align == 1 then
+  obj.cy = layout_height / 2 - buffer_top - buffer_height / 2
 elseif vertical_align == 2 then
-  obj.cy = layout_height / 2
+  obj.cy = layout_height - buffer_top - buffer_height / 2
 end
 if horizontal_align == 0 then
-  obj.cx = -layout_width / 2
+  obj.cx = -buffer_left - buffer_width / 2
+elseif horizontal_align == 1 or horizontal_align == 3 then
+  obj.cx = layout_width / 2 - buffer_left - buffer_width / 2
 elseif horizontal_align == 2 then
-  obj.cx = layout_width / 2
+  obj.cx = layout_width - buffer_left - buffer_width / 2
 end

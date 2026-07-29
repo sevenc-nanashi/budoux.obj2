@@ -3,13 +3,21 @@ use aviutl2::{anyhow::Context, tracing};
 use crate::evaluate_chars::{
     char_states_to_text, controls_between_to_text, controls_to_text, evaluate_chars,
 };
-use crate::lua_handle::{FullTextDecoration, LuaHandle};
+use crate::lua_handle::{FullTextDecoration, LuaHandle, TextLayout};
 use crate::segment;
 
 #[derive(Debug, serde::Serialize)]
 pub struct Layout {
     content: String,
     position: (f64, f64),
+    size: (f64, f64),
+}
+
+fn apply_negative_center_delta(x: f64, y: f64, text_layout: TextLayout) -> (f64, f64) {
+    (
+        x - text_layout.negative_center_x_delta,
+        y - text_layout.negative_center_y_delta,
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,9 +160,9 @@ fn build_wrapped_lines(
                     controls,
                     f64::INFINITY,
                 );
-                let (segment_width, _) =
+                let segment_layout =
                     lua_handle.text_layout(&segment_text, decoration, char_spacing)?;
-                if segment_width > width {
+                if segment_layout.width > width {
                     if current_line.is_empty() {
                         if segment.chars.len() == 1 {
                             // 1文字も入らない場合はその文字だけで改行する
@@ -238,30 +246,37 @@ fn layout_wrapped_lines(
         } else {
             *align
         };
-        let (line_width, line_height) =
-            lua_handle.text_layout(&current_line_text, decoration, char_spacing)?;
+        let line_layout = lua_handle.text_layout(&current_line_text, decoration, char_spacing)?;
         if !line_chars
             .iter()
             .any(|char_state| char_state.start_time <= time)
         {
             // 空行の場合は高さだけを確保して次の行へ
-            line_y += line_height as f64 + line_spacing;
+            line_y += line_layout.height as f64 + line_spacing;
             continue;
         }
-        let (visible_line_width, _) =
+        let visible_line_layout =
             lua_handle.text_layout(&visible_current_line_text, decoration, char_spacing)?;
-        let y = line_y + line_height as f64 / 2.0;
+        let line_center_y = line_y + line_layout.height as f64 / 2.0;
         match horizontal_align {
             HorizontalAlign::Justify if line_chars.len() == 1 => {
                 // 1文字しかない場合は両端揃えできないので中央揃えにする
                 layouts.push(Layout {
                     content: visible_current_line_text,
-                    position: (width as f64 / 2.0, y),
+                    position: apply_negative_center_delta(
+                        width as f64 / 2.0,
+                        line_center_y,
+                        visible_line_layout,
+                    ),
+                    size: (
+                        visible_line_layout.width as f64,
+                        visible_line_layout.height as f64,
+                    ),
                 });
             }
             HorizontalAlign::Justify => {
                 let space_between_chars =
-                    (width as f64 - line_width as f64) / (line_chars.len() - 1) as f64;
+                    (width as f64 - line_layout.width as f64) / (line_chars.len() - 1) as f64;
                 let mut emitted_controls = line_chars[0].control_index;
                 let mut draw_text = controls_to_text(controls, emitted_controls);
                 for c in line_chars.iter() {
@@ -274,57 +289,85 @@ fn layout_wrapped_lines(
                         draw_text.push_str(&c.unit.to_string());
                     } else {
                         let control_prefix = controls_to_text(controls, c.control_index);
-                        let (base_char_width, _) = lua_handle.text_layout(
+                        let base_char_layout = lua_handle.text_layout(
                             &format!("{control_prefix} "),
                             decoration,
                             char_spacing,
                         )?;
-                        let (char_width, _) = lua_handle.text_layout(
+                        let char_layout = lua_handle.text_layout(
                             &format!("{control_prefix} {}", c.unit),
                             decoration,
                             char_spacing,
                         )?;
                         draw_text.push_str(&format!(
                             "<p+{:.2},+0>",
-                            (char_width - base_char_width) as f64,
+                            (char_layout.width - base_char_layout.width) as f64,
                         ));
                     }
                     draw_text.push_str(&format!("<p+{:.2},+0>", space_between_chars));
                     emitted_controls = c.control_index;
                 }
-                let (draw_text_width, _) =
+                let draw_text_layout =
                     lua_handle.text_layout(&draw_text, decoration, char_spacing)?;
                 layouts.push(Layout {
                     content: draw_text,
-                    position: (draw_text_width as f64 / 2.0, y),
+                    position: apply_negative_center_delta(
+                        draw_text_layout.width as f64 / 2.0,
+                        line_center_y,
+                        draw_text_layout,
+                    ),
+                    size: (
+                        draw_text_layout.width as f64,
+                        draw_text_layout.height as f64,
+                    ),
                 });
             }
             HorizontalAlign::Left => {
                 layouts.push(Layout {
                     content: visible_current_line_text,
-                    position: (visible_line_width as f64 / 2.0, y),
+                    position: apply_negative_center_delta(
+                        visible_line_layout.width as f64 / 2.0,
+                        line_center_y,
+                        visible_line_layout,
+                    ),
+                    size: (
+                        visible_line_layout.width as f64,
+                        visible_line_layout.height as f64,
+                    ),
                 });
             }
             HorizontalAlign::Center => {
                 layouts.push(Layout {
                     content: visible_current_line_text,
-                    position: (
-                        width as f64 / 2.0 - (line_width as f64 - visible_line_width as f64) / 2.0,
-                        y,
+                    position: apply_negative_center_delta(
+                        width as f64 / 2.0
+                            - (line_layout.width as f64 - visible_line_layout.width as f64) / 2.0,
+                        line_center_y,
+                        visible_line_layout,
+                    ),
+                    size: (
+                        visible_line_layout.width as f64,
+                        visible_line_layout.height as f64,
                     ),
                 });
             }
             HorizontalAlign::Right => {
                 layouts.push(Layout {
                     content: visible_current_line_text,
-                    position: (
-                        width as f64 - line_width as f64 + visible_line_width as f64 / 2.0,
-                        y,
+                    position: apply_negative_center_delta(
+                        width as f64 - line_layout.width as f64
+                            + visible_line_layout.width as f64 / 2.0,
+                        line_center_y,
+                        visible_line_layout,
+                    ),
+                    size: (
+                        visible_line_layout.width as f64,
+                        visible_line_layout.height as f64,
                     ),
                 });
             }
         }
-        line_y += line_height as f64 + line_spacing;
+        line_y += line_layout.height as f64 + line_spacing;
     }
     line_y -= line_spacing;
 
@@ -427,10 +470,9 @@ pub fn layout(
             } in wrapped_lines.iter()
             {
                 let line_text = char_states_to_text(line_chars, &evaluated.controls, f64::INFINITY);
-                let (line_width, _) =
-                    lua_handle.text_layout(&line_text, decoration, char_spacing)?;
-                if line_width > max_line_width {
-                    max_line_width = line_width;
+                let line_layout = lua_handle.text_layout(&line_text, decoration, char_spacing)?;
+                if line_layout.width > max_line_width {
+                    max_line_width = line_layout.width;
                 }
             }
             max_line_width
@@ -457,4 +499,25 @@ pub fn layout(
         width as f64,
         height,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn negative_center_delta_moves_position_negatively() {
+        let position = apply_negative_center_delta(
+            100.0,
+            50.0,
+            TextLayout {
+                width: 20,
+                height: 30,
+                negative_center_x_delta: 4.0,
+                negative_center_y_delta: 10.0,
+            },
+        );
+
+        assert_eq!(position, (96.0, 40.0));
+    }
 }

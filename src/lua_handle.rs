@@ -86,21 +86,25 @@ impl<'a> aviutl2::module::FromScriptModuleParamTable<'a> for FullTextDecoration 
     fn from_param_table(
         param: &'a aviutl2::module::ScriptModuleParamTable,
         key: &str,
-    ) -> Result<
-        FullTextDecoration,
-        aviutl2::module::GetParamError<serde::de::value::Error>,
-    > {
+    ) -> Result<FullTextDecoration, aviutl2::module::GetParamError<serde::de::value::Error>> {
         use serde::Deserialize;
         use serde::de::IntoDeserializer;
         let value = param.get_int(key);
         let deserializer: serde::de::value::I32Deserializer<serde::de::value::Error> =
             value.into_deserializer();
-        Self::deserialize(deserializer)
-            .map_err(aviutl2::module::GetParamError::ConversionError)
+        Self::deserialize(deserializer).map_err(aviutl2::module::GetParamError::ConversionError)
     }
 }
 
-static LAYOUT_CACHE: std::sync::LazyLock<dashmap::DashMap<u64, (usize, usize)>> =
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+pub struct TextLayout {
+    pub width: usize,
+    pub height: usize,
+    pub negative_center_x_delta: f64,
+    pub negative_center_y_delta: f64,
+}
+
+static LAYOUT_CACHE: std::sync::LazyLock<dashmap::DashMap<u64, TextLayout>> =
     std::sync::LazyLock::new(dashmap::DashMap::new);
 
 impl LuaHandle {
@@ -114,7 +118,7 @@ impl LuaHandle {
         styled_text: &str,
         decoration: FullTextDecoration,
         char_spacing: f64,
-    ) -> anyhow::Result<(usize, usize)> {
+    ) -> anyhow::Result<TextLayout> {
         let cache_key = {
             // NOTE: さすがに衝突はしないでしょう...
             use xxhash_rust::xxh3::Xxh3;
@@ -137,21 +141,17 @@ impl LuaHandle {
         };
         let buffer = serde_luajit_buffer::serialize_one(&request, &Default::default())?;
         unsafe { (self.callback)(buffer.as_ptr(), buffer.len()) };
-        #[derive(serde::Deserialize)]
-        struct ReturnValue {
-            width: usize,
-            height: usize,
-        }
-        let result =
-            pop_return_stack::<ReturnValue>().context("Failed to pop from return stack")?;
+        let result = pop_return_stack::<TextLayout>().context("Failed to pop from return stack")?;
         tracing::debug!(
-            "text_layout result: width={}, height={}",
+            "text_layout result: width={}, height={}, negative_center_delta=({}, {})",
             result.width,
-            result.height
+            result.height,
+            result.negative_center_x_delta,
+            result.negative_center_y_delta,
         );
 
-        LAYOUT_CACHE.insert(cache_key, (result.width, result.height));
-        Ok((result.width, result.height))
+        LAYOUT_CACHE.insert(cache_key, result);
+        Ok(result)
     }
 
     pub fn evaluate_inline_script(&self, script: &str) -> anyhow::Result<String> {
