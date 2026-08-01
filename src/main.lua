@@ -259,7 +259,7 @@ for _, item in ipairs(layout) do
   buffer_right = math.max(buffer_right, math.ceil(item.position[1] + item.size[1] / 2))
   buffer_bottom = math.max(buffer_bottom, math.ceil(item.position[2] + item.size[2] / 2))
 end
-local buffer_width = buffer_right - buffer_left
+local buffer_width = math.min(buffer_right - buffer_left, layout_width)
 local buffer_height = buffer_bottom - buffer_top
 
 obj.setoption("drawtarget", "tempbuffer", buffer_width, buffer_height)
