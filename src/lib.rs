@@ -16,7 +16,7 @@ impl aviutl2::module::ScriptModule for BudouxMod2 {
             .with_max_level(if cfg!(debug_assertions) {
                 tracing::metadata::LevelFilter::TRACE
             } else {
-                tracing::metadata::LevelFilter::DEBUG
+                tracing::metadata::LevelFilter::INFO
             })
             .event_format(aviutl2::logger::AviUtl2Formatter)
             .with_writer(aviutl2::logger::AviUtl2LogWriter)
